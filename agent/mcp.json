@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "leash": {
+      "command": "bun",
+      "args": ["run", "agent/src/mcp.ts"]
+    }
+  }
+}
