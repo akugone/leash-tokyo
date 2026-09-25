@@ -1,0 +1,281 @@
+/**
+ * Leash agent client: read the policy the hook enforces for a name, swap through Uniswap v4 with a
+ * signed `SwapIntent`, and report every step to the dashboard's agent feed. Shared by the MCP server
+ * (`mcp.ts`) and usable from any other agent runtime.
+ */
+import {
+  createPublicClient,
+  createWalletClient,
+  defineChain,
+  formatUnits,
+  http,
+  parseUnits,
+  type Address,
+  type Hex,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { sepolia } from "viem/chains";
+import { LEASH_HOOK_ABI, POOL_SWAP_TEST_ABI } from "./abi.ts";
+import { MAX_SQRT_PRICE, MIN_SQRT_PRICE, POOL_SWAP_TEST, ensureAllowance, tokenMeta, type Deployments } from "./bot.ts";
+import { decodeRevertData, explainRevert, revertDataFromError } from "./errors.ts";
+import { encodeHookData, leashDomain, namehash, signIntent, type SwapIntent } from "./intent.ts";
+
+const INTENT_TTL_SECONDS = 300n;
+
+// ============ Types ============
+
+export type AgentEventKind = "policy" | "intent" | "sent" | "ok" | "revert" | "skip" | "error";
+
+export type AgentEvent = {
+  kind: AgentEventKind;
+  text: string;
+  name: string;
+  /** Human amounts in quote token units when relevant. */
+  amount?: string;
+  txHash?: Hex;
+  block?: string;
+};
+
+export type LeashState = {
+  name: string;
+  node: Hex;
+  agent: Address;
+  signer: Address;
+  quote: { address: Address; symbol: string; decimals: number };
+  cap: bigint;
+  spent: bigint;
+  remaining: bigint;
+  tokens: readonly Address[];
+  expiry: bigint;
+  nonce: bigint;
+};
+
+export type SwapResult =
+  | { status: "ok"; txHash: Hex; block: bigint; amount: bigint; spentToday: bigint; cap: bigint }
+  | { status: "revert"; reason: string; amount: bigint };
+
+export class LeashError extends Error {
+  constructor(
+    message: string,
+    readonly reason?: string,
+  ) {
+    super(message);
+  }
+}
+
+// ============ Client ============
+
+export class LeashClient {
+  readonly account;
+  readonly publicClient;
+  readonly walletClient;
+  private readonly feedUrl: string | null;
+  private readonly onEvent?: (e: AgentEvent) => void;
+  /** Swaps run one at a time: two intents signed with the same nonce would make the second one BadNonce. */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(
+    readonly deployments: Deployments,
+    rpcUrl: string,
+    agentPk: Hex,
+    opts: { feedUrl?: string | null; onEvent?: (e: AgentEvent) => void } = {},
+  ) {
+    const chainId = Number(deployments.chainId);
+    const chain = chainId === sepolia.id ? sepolia : defineChain({ ...sepolia, id: chainId, name: `chain-${chainId}` });
+    this.account = privateKeyToAccount(agentPk);
+    this.publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+    this.walletClient = createWalletClient({ account: this.account, chain, transport: http(rpcUrl) });
+    this.feedUrl = opts.feedUrl ?? null;
+    this.onEvent = opts.onEvent;
+  }
+
+  fullName(label = this.deployments.agentLabel): string {
+    return `${label}.${this.deployments.parentName}`;
+  }
+
+  /** Policy as the hook sees it. Throws `LeashError` with the decoded reason when the hook refuses the name. */
+  async readState(label = this.deployments.agentLabel, emitPolicy = true): Promise<LeashState> {
+    const name = this.fullName(label);
+    const node = namehash(name);
+    const hook = this.deployments.hook;
+    const ctx = { label, parentName: this.deployments.parentName };
+    let policy: readonly [Address, Address, bigint, readonly Address[], bigint];
+    try {
+      policy = await this.publicClient.readContract({
+        address: hook,
+        abi: LEASH_HOOK_ABI,
+        functionName: "policy",
+        args: [label],
+      });
+    } catch (err) {
+      const data = revertDataFromError(err);
+      if (!data) throw err;
+      const reason = explainRevert(decodeRevertData(data), ctx);
+      await this.emit({ kind: "revert", name, text: `policy read reverted: ${reason}` });
+      throw new LeashError(`${name}: ${reason}`, reason);
+    }
+    const [remaining, spent, nonce] = await Promise.all([
+      this.publicClient.readContract({
+        address: hook,
+        abi: LEASH_HOOK_ABI,
+        functionName: "remainingToday",
+        args: [label],
+      }),
+      this.publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: "spentToday", args: [node] }),
+      this.publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: "nonces", args: [node] }),
+    ]);
+    const quoteMeta = await tokenMeta(this.publicClient, policy[1]);
+    const state: LeashState = {
+      name,
+      node,
+      agent: policy[0],
+      signer: this.account.address,
+      quote: { address: policy[1], ...quoteMeta },
+      cap: policy[2],
+      spent,
+      remaining,
+      tokens: policy[3],
+      expiry: policy[4],
+      nonce,
+    };
+    if (emitPolicy) {
+      await this.emit({
+        kind: "policy",
+        name,
+        text: `cap ${this.fmt(state, state.cap)}, spent ${this.fmt(state, state.spent)}, remaining ${this.fmt(state, state.remaining)}, nonce ${nonce}`,
+      });
+    }
+    return state;
+  }
+
+  /**
+   * Exact-input swap of `amount` quote tokens (human units, e.g. "25"). Simulates first: a hook revert comes
+   * back as `{ status: "revert" }` with the decoded reason instead of throwing. Never clamps the amount:
+   * the hook is the enforcement point, not this client.
+   */
+  swap(amountHuman: string, label = this.deployments.agentLabel): Promise<SwapResult> {
+    const next = this.queue.then(() => this.swapNow(amountHuman, label));
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async swapNow(amountHuman: string, label: string): Promise<SwapResult> {
+    // The intent event that follows already carries the numbers, no separate policy line.
+    const state = await this.readState(label, false);
+    const { deployments } = this;
+    const amount = parseUnits(amountHuman, state.quote.decimals);
+    if (amount <= 0n) throw new LeashError("amount must be positive");
+    const quoteIsToken0 = state.quote.address.toLowerCase() === deployments.token0.toLowerCase();
+    const deadline = BigInt(Math.floor(Date.now() / 1000)) + INTENT_TTL_SECONDS;
+    const intent: SwapIntent = {
+      node: state.node,
+      poolId: deployments.poolId,
+      zeroForOne: quoteIsToken0,
+      amountSpecified: -amount,
+      nonce: state.nonce,
+      deadline,
+    };
+    const chainId = await this.publicClient.getChainId();
+    const signature = await signIntent(this.account, leashDomain(chainId, deployments.hook), intent);
+    const hookData = encodeHookData(label, intent, signature);
+    const amountText = this.fmt(state, amount);
+    await this.emit({
+      kind: "intent",
+      name: state.name,
+      amount: amountText,
+      text: `signed SwapIntent: ${amountText} exact in, ${quoteIsToken0 ? "0->1" : "1->0"}, nonce ${state.nonce}`,
+    });
+
+    await ensureAllowance(
+      this.publicClient,
+      this.walletClient,
+      this.account.address,
+      state.quote.address,
+      amount,
+      state.quote.symbol,
+    );
+
+    const swapArgs = [
+      {
+        currency0: deployments.token0,
+        currency1: deployments.token1,
+        fee: Number(deployments.fee),
+        tickSpacing: Number(deployments.tickSpacing),
+        hooks: deployments.hook,
+      },
+      {
+        zeroForOne: intent.zeroForOne,
+        amountSpecified: intent.amountSpecified,
+        sqrtPriceLimitX96: intent.zeroForOne ? MIN_SQRT_PRICE + 1n : MAX_SQRT_PRICE - 1n,
+      },
+      { takeClaims: false, settleUsingBurn: false },
+      hookData,
+    ] as const;
+
+    let request;
+    try {
+      ({ request } = await this.publicClient.simulateContract({
+        address: POOL_SWAP_TEST,
+        abi: POOL_SWAP_TEST_ABI,
+        functionName: "swap",
+        args: swapArgs,
+        account: this.account,
+      }));
+    } catch (err) {
+      const data = revertDataFromError(err);
+      if (!data) throw err;
+      const reason = explainRevert(decodeRevertData(data), {
+        label,
+        parentName: deployments.parentName,
+        decimals: state.quote.decimals,
+        symbol: state.quote.symbol,
+      });
+      await this.emit({ kind: "revert", name: state.name, amount: amountText, text: `REVERT ${reason}` });
+      return { status: "revert", reason, amount };
+    }
+
+    const txHash = await this.walletClient.writeContract(request);
+    await this.emit({ kind: "sent", name: state.name, amount: amountText, txHash, text: `sent ${txHash}` });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== "success") {
+      const reason = `tx ${txHash} reverted on chain (block ${receipt.blockNumber})`;
+      await this.emit({ kind: "revert", name: state.name, amount: amountText, txHash, text: reason });
+      return { status: "revert", reason, amount };
+    }
+    const spentToday = await this.publicClient.readContract({
+      address: deployments.hook,
+      abi: LEASH_HOOK_ABI,
+      functionName: "spentToday",
+      args: [state.node],
+    });
+    await this.emit({
+      kind: "ok",
+      name: state.name,
+      amount: amountText,
+      txHash,
+      block: receipt.blockNumber.toString(),
+      text: `OK block ${receipt.blockNumber}, spent today ${this.fmt(state, spentToday)} of ${this.fmt(state, state.cap)}`,
+    });
+    return { status: "ok", txHash, block: receipt.blockNumber, amount, spentToday, cap: state.cap };
+  }
+
+  fmt(state: Pick<LeashState, "quote">, value: bigint): string {
+    return `${formatUnits(value, state.quote.decimals)} ${state.quote.symbol}`;
+  }
+
+  /** Best effort: the dashboard feed is optional, a dead feed never blocks a trade. */
+  async emit(event: AgentEvent): Promise<void> {
+    this.onEvent?.(event);
+    if (!this.feedUrl) return;
+    try {
+      await fetch(this.feedUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...event, ts: Date.now(), source: "agent" }),
+        signal: AbortSignal.timeout(1_500),
+      });
+    } catch {
+      // feed offline
+    }
+  }
+}
