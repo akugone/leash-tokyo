@@ -12,6 +12,9 @@ env:
 jobs:
   forge:
     runs-on: ubuntu-latest
+    # Step `if:` cannot read `secrets`, so the fork RPC goes through the job env.
+    env:
+      SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,7 +35,5 @@ jobs:
 
       # Fork tests hit ENSv2 and Uniswap v4 on Sepolia. They only run when the RPC secret is configured.
       - name: Fork tests
-        if: ${{ secrets.SEPOLIA_RPC_URL != '' }}
-        env:
-          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+        if: env.SEPOLIA_RPC_URL != ''
         run: forge test --match-path 'test/fork/**' -vv
