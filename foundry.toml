@@ -1,0 +1,27 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+solc = "0.8.26"
+evm_version = "cancun"
+optimizer = true
+# v4-core PoolManager needs this many runs to compile under via-IR without stack too deep (same value as v4-core).
+optimizer_runs = 44444444
+via_ir = true
+# Scripts write deployment records, tests read fixtures.
+fs_permissions = [
+    { access = "read-write", path = "./deployments" },
+    { access = "read", path = "./test/fixtures" },
+]
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+multi_line_func_header = "all"
+number_underscore = "thousands"
+
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
