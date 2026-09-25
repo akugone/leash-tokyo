@@ -1,0 +1,23 @@
+{
+  "name": "leash-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Leash demo agent: signs EIP-712 swap intents and swaps through Uniswap v4 PoolSwapTest",
+  "scripts": {
+    "bot": "bun run src/bot.ts",
+    "gen-fixture": "bun run scripts/gen-fixture.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.6.0"
+  }
+}
