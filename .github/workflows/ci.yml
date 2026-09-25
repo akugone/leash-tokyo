@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  FOUNDRY_PROFILE: default
+  FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Format
+        run: forge fmt --check
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Unit tests
+        run: forge test --no-match-path 'test/fork/**' -vv
+
+      # Fork tests hit ENSv2 and Uniswap v4 on Sepolia. They only run when the RPC secret is configured.
+      - name: Fork tests
+        if: ${{ secrets.SEPOLIA_RPC_URL != '' }}
+        env:
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+        run: forge test --match-path 'test/fork/**' -vv
