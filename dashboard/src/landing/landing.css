@@ -416,6 +416,13 @@ code {
   grid-template-columns: repeat(3, 1fr);
 }
 
+/* A lone card on the last row sits in the middle column instead of hanging on the left. */
+@media (min-width: 901px) {
+  .lp-grid-3 > :last-child:nth-child(3n + 1) {
+    grid-column: 2;
+  }
+}
+
 .lp-card {
   background: #fff;
   border: 1px solid var(--lp-line);

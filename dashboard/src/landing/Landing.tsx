@@ -232,6 +232,7 @@ function Problems() {
   const cases: { icon: IconName; title: string; body: string }[] = [
     { icon: "coin", title: "Daily notional caps", body: "Cap what an agent can move per UTC day, measured on the real settlement delta, not an oracle." },
     { icon: "lock", title: "Token allowlists", body: "Restrict an agent to the pairs it is meant to trade. Anything else reverts in beforeSwap." },
+    { icon: "chart", title: "Slippage bounds", body: "Cap the price impact of every swap with leash.maxSlippageBps. A looser price limit reverts with SlippageTooLoose." },
     { icon: "clock", title: "Time boxed mandates", body: "Give a subname an expiry. The mandate lapses on its own, no one has to remember." },
     { icon: "user", title: "Split duties", body: "A risk manager edits the limits, never the identity. Only the owner can issue or revoke." },
     { icon: "scissors", title: "Instant kill switch", body: "Cut the leash: unregister the subname and the next swap reverts with LeashRevoked." },
@@ -349,6 +350,7 @@ function GetStarted() {
         "Register the parent name and deploy the org registry, resolver and hook",
         "Issue a subname per agent, with an expiry",
         "Grant the risk-manager role on the policy keys only",
+        "Set the slippage bound, leash.maxSlippageBps, which only the owner can change",
         "Cut the leash when needed",
       ],
     },
@@ -358,7 +360,7 @@ function GetStarted() {
       does: [
         "Watch spend against the cap on the dashboard",
         "Tighten leash.dailyNotional or leash.tokens at any time",
-        "Cannot mint, revoke or re-point an agent",
+        "Cannot mint, revoke or re-point an agent, nor loosen the slippage bound",
       ],
     },
     {
