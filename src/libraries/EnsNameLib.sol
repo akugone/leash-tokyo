@@ -17,7 +17,7 @@ library EnsNameLib {
     }
 
     /// @notice DNS-encode `label` in front of an already DNS-encoded `parentName`.
-    /// @dev `dnsEncode("trader-1", dnsEncodeName("acme.eth"))` == `\x08trader-1\x04acme\x03eth\x00`.
+    /// @dev `dnsEncode("trader-1", dnsEncodeName("leash.eth"))` == `\x08trader-1\x05leash\x03eth\x00`.
     function dnsEncode(string memory label, bytes memory parentName) internal pure returns (bytes memory) {
         uint256 len = bytes(label).length;
         if (len == 0) revert EmptyLabel();
@@ -25,7 +25,7 @@ library EnsNameLib {
         return abi.encodePacked(uint8(len), label, parentName);
     }
 
-    /// @notice DNS-encode a dotted name such as `acme.eth`.
+    /// @notice DNS-encode a dotted name such as `leash.eth`.
     function dnsEncodeName(string memory name) internal pure returns (bytes memory out) {
         bytes memory b = bytes(name);
         uint256 start = 0;
@@ -45,7 +45,7 @@ library EnsNameLib {
         out = abi.encodePacked(out, uint8(0));
     }
 
-    /// @notice ENS namehash of a dotted name such as `trader-1.acme.eth`.
+    /// @notice ENS namehash of a dotted name such as `trader-1.leash.eth`.
     function namehash(string memory name) internal pure returns (bytes32 node) {
         bytes memory b = bytes(name);
         if (b.length == 0) return bytes32(0);

@@ -19,7 +19,7 @@ import {MockResolver} from "../mocks/MockResolver.sol";
 /// @dev Uses `vm.getBlockTimestamp()` instead of `block.timestamp` in test code: via-IR may cache
 ///      `block.timestamp` within a call, which breaks `vm.warp` in the middle of a test.
 abstract contract LeashHookBase is Deployers {
-    string internal constant PARENT_NAME = "acme.eth";
+    string internal constant PARENT_NAME = "leash.eth";
     string internal constant LABEL = "trader-1";
     uint256 internal constant CAP = 1000e18;
     uint64 internal constant NAME_DURATION = 7 days;

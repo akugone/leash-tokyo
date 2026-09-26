@@ -47,12 +47,12 @@ const intent: SwapIntent = {
   deadline: BigInt(fixture.intent.deadline),
 };
 const domain = leashDomain(Number(fixture.chainId), fixture.verifyingContract);
-const ctx = { label: "trader-1", parentName: "leashdemo.eth" };
+const ctx = { label: "trader-1", parentName: "leash.eth" };
 
 describe("intent", () => {
   test("namehash and dnsEncode match ENS wire formats", () => {
-    expect(namehash("trader-1.leashdemo.eth")).toBe(fixture.intent.node);
-    expect(dnsEncode("trader-1.leashdemo.eth")).toBe("0x087472616465722d31096c6561736864656d6f0365746800");
+    expect(namehash("trader-1.leash.eth")).toBe(fixture.intent.node);
+    expect(dnsEncode("trader-1.leash.eth")).toBe("0x087472616465722d31056c656173680365746800");
     expect(labelhash("trader-1")).toBe(keccak256(toHex("trader-1")));
   });
 
@@ -103,7 +103,7 @@ describe("errors", () => {
     expect(decoded.target).toBe(hook);
     expect(decoded.args).toEqual([intent.node, 1500n, 1000n]);
     expect(explainRevert(decoded, ctx)).toBe(
-      "DailyCapExceeded: trader-1.leashdemo.eth would reach 1500 of cap 1000 today",
+      "DailyCapExceeded: trader-1.leash.eth would reach 1500 of cap 1000 today",
     );
   });
 
@@ -125,7 +125,7 @@ describe("errors", () => {
     const decoded = decodeRevertData(wrap(wrap(reason), "0x2000000000000000000000000000000000000002"));
     expect(decoded.name).toBe("LeashRevoked");
     expect(decoded.target).toBe(hook);
-    expect(explainRevert(decoded, ctx)).toContain("LeashRevoked: trader-1.leashdemo.eth was cut at 1800000000");
+    expect(explainRevert(decoded, ctx)).toContain("LeashRevoked: trader-1.leash.eth was cut at 1800000000");
   });
 
   test("decodes an unwrapped hook error", () => {

@@ -49,7 +49,7 @@ contract LeashIntentFixtureTest is Test {
 
     function test_Fixture_NodeIsNamehashOfName() public view {
         assertEq(intent.node, EnsNameLib.namehash(vm.parseJsonString(json, ".name")));
-        assertEq(intent.node, EnsNameLib.childNode(EnsNameLib.namehash("leashdemo.eth"), label));
+        assertEq(intent.node, EnsNameLib.childNode(EnsNameLib.namehash("leash.eth"), label));
     }
 
     // ============ domainSeparator Tests ============
