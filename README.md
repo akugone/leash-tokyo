@@ -100,9 +100,9 @@ forge build && forge test
 
 ```bash
 script/demo.sh anvil            # 1. anvil fork of Sepolia (real ENSv2 and Uniswap v4 contracts)
-script/demo.sh setup            # 2. one shot, about a minute: registers leashdemo.eth, deploys the org registry,
-                                #    resolver, hook, pool and org vault, issues trader-1.leashdemo.eth with its policy
-cd dashboard && bun run dev    # 3. http://localhost:5173/?label=trader-1 (setup already synced the record)
+script/demo.sh setup            # 2. one shot, about a minute: registers leash.eth, deploys the org registry,
+                                #    resolver, hook, pool and org vault, issues trader-1.leash.eth with its policy
+script/demo.sh dashboard        # 3. http://localhost:5173/app?label=trader-1 (setup already synced the record)
 script/demo.sh agent            # 4. Claude Code as trader-1, with only the leash_policy and leash_swap tools
 ```
 
@@ -113,6 +113,8 @@ Then, side by side:
    Optional: dashboard, owner card, set max slippage to 5 bps. `buy 100 lUSD of lETH` is partially filled at the price limit, asking for 0.5% slippage reverts `SlippageTooLoose`.
 3. Dashboard, risk-manager card: set the cap to 10 and click **tighten the leash**. Click **try to revoke**: every attempt reverts with `EACUnauthorizedAccountRoles`.
 4. Dashboard, owner card: **cut the leash**. Status flips to REVOKED. Ask the agent to trade again: `LeashRevoked`.
+
+The same acts run against the live Sepolia deployment: prefix any command with `LEASH_NETWORK=sepolia` (for instance `LEASH_NETWORK=sepolia script/demo.sh agent`), and start the dashboard with `LEASH_NETWORK=sepolia script/demo.sh dashboard` to keep the owner and risk-manager controls. `LEASH_NETWORK=sepolia script/demo.sh deploy` is the one shot live deployment.
 
 Step by step script with expected output: [docs/demo.md](docs/demo.md). Reset between runs: restart `script/demo.sh anvil`, run `setup` again (it also clears the dashboard feed), reload the dashboard.
 

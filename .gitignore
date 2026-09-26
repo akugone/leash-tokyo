@@ -11,6 +11,8 @@ node_modules/
 # Env
 .env
 .env.*
+# Public build settings (the hosted dashboard RPC), no secrets.
+!dashboard/.env.production
 !.env.example
 
 # OS / editors
@@ -24,3 +26,6 @@ deployments/anvil.json
 docs/demo/*.webm
 docs/demo/*.mp4
 docs/demo/*.mov
+
+# Vercel CLI project link
+.vercel/

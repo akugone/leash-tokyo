@@ -11,7 +11,7 @@ import {SepoliaAddresses} from "../Addresses.sol";
 import {DeploymentsScript} from "../Deployments.sol";
 
 /// @notice Common env, address book and JSON lookups for the ENS setup scripts.
-/// @dev Env: `OWNER_PK`, `RISK_MANAGER_PK`, `AGENT_PK`, `PARENT_LABEL` (default `leashdemo`),
+/// @dev Env: `OWNER_PK`, `RISK_MANAGER_PK`, `AGENT_PK`, `PARENT_LABEL` (default `leash`),
 ///      `AGENT_LABEL` (default `trader-1`). Names fall back to the deployments JSON when it already has them.
 abstract contract EnsScriptBase is DeploymentsScript {
     IETHRegistrar internal constant REGISTRAR = IETHRegistrar(SepoliaAddresses.ENS_ETH_REGISTRAR);
@@ -37,9 +37,9 @@ abstract contract EnsScriptBase is DeploymentsScript {
         return vm.addr(vm.envUint("AGENT_PK"));
     }
 
-    /// @dev Env first so a fresh run can pick a new label, JSON otherwise, `leashdemo` as last resort.
+    /// @dev Env first so a fresh run can pick a new label, JSON otherwise, `leash` as last resort.
     function _parentLabel() internal view returns (string memory) {
-        return _envOrJson("PARENT_LABEL", "parentLabel", "leashdemo");
+        return _envOrJson("PARENT_LABEL", "parentLabel", "leash");
     }
 
     function _parentName() internal view returns (string memory) {

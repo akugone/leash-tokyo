@@ -67,7 +67,7 @@ export function Settings({ config, source, onApply, onClose }: Props) {
           onChange={(e) => setBlob(e.target.value)}
           rows={6}
           spellCheck={false}
-          placeholder='{"chainId":"11155111","parentName":"leashdemo.eth", ...}'
+          placeholder='{"chainId":"11155111","parentName":"leash.eth", ...}'
         />
       </label>
       {error && <div className="card-error">{error}</div>}

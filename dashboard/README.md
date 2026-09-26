@@ -16,8 +16,22 @@ bun run dev                # http://localhost:5173
 Local anvil demo URL (defaults, nothing to type):
 
 ```
-http://localhost:5173/?rpc=http://127.0.0.1:8545&label=trader-1
+http://localhost:5173/app?label=trader-1
 ```
+
+Against the live Sepolia deployment, with the demo controls and the feed: `LEASH_NETWORK=sepolia script/demo.sh dashboard`
+from the repo root. It copies `deployments/sepolia.json`, and points both the browser and the demo controls at
+`SEPOLIA_RPC_URL`.
+
+## Hosted build (Vercel)
+
+`vercel.json` at the repo root builds this folder with `LEASH_ENV=sepolia`, so the site reads the committed
+`deployments/sepolia.json`. `.env.production` sets the default RPC to a public Sepolia endpoint (`VITE_LEASH_RPC`):
+never a keyed RPC, it ships in the bundle. `.vercelignore` uploads only `dashboard/` and `deployments/`. The hosted
+site has no dev server, so no activity feed. Its owner and risk-manager cards sign with a connected wallet
+through Reown AppKit (`VITE_REOWN_PROJECT_ID`, public, allowed domains set in the Reown dashboard): import both
+accounts in the wallet and switch between them. "Try to revoke" is a simulation and needs no wallet. Deploy with `vercel --prod` from the
+repo root.
 
 ## Demo mode (dev server only)
 
@@ -29,11 +43,11 @@ Keys never reach the browser. The static build has no plugin: the feed shows off
 
 ## URL parameters
 
-| Param         | Default                 | Meaning                                                                  |
-| ------------- | ----------------------- | ------------------------------------------------------------------------ |
-| `rpc`         | `http://127.0.0.1:8545` | JSON-RPC endpoint (anvil, or a Sepolia RPC for the public deployment)    |
-| `deployments` | `/deployments.json`     | Path or URL of the deployments JSON described in `deployments/README.md` |
-| `label`       | `trader-1`              | Agent subname label. The full name is `<label>.<parentName from JSON>`   |
+| Param         | Default                                        | Meaning                                                                  |
+| ------------- | ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `rpc`         | `VITE_LEASH_RPC`, else `http://127.0.0.1:8545` | JSON-RPC endpoint (anvil, or a Sepolia RPC for the public deployment)    |
+| `deployments` | `/deployments.json`                            | Path or URL of the deployments JSON described in `deployments/README.md` |
+| `label`       | `trader-1`                                     | Agent subname label. The full name is `<label>.<parentName from JSON>`   |
 
 The settings drawer (top right) edits the same values and also accepts a pasted deployments JSON blob, stored in the browser and used instead of the URL. Chain id comes from the JSON.
 

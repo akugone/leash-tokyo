@@ -1,18 +1,36 @@
-import { useEffect, useState } from "react";
-import { shortHex, slippageInputError } from "../lib/leash";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { shortHex, slippageInputError, type Deployments } from "../lib/leash";
 
 type Status = { enabled: boolean; riskManager: string | null; owner: string | null; name: string };
 
-type Outcome = { tone: "ok" | "bad" | "info"; text: string } | null;
+export type Outcome = { tone: "ok" | "bad" | "info"; text: string; txHash?: string } | null;
 
-/// The two human roles of the story, acting through the dev server which holds their keys (demo only).
-export function Controls({ onChanged, revoked }: { onChanged: () => void; revoked: boolean }) {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [cap, setCap] = useState("10");
-  const [slippage, setSlippage] = useState("50");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [riskOut, setRiskOut] = useState<Outcome>(null);
-  const [ownerOut, setOwnerOut] = useState<Outcome>(null);
+/// The four human actions, however they get signed.
+export type RoleActions = {
+  tighten: (cap: string) => Promise<Outcome>;
+  forbid: () => Promise<Outcome>;
+  slippage: (bps: string) => Promise<Outcome>;
+  cut: () => Promise<Outcome>;
+};
+
+/// Whether this page can sign as a role right now, and what to show when it cannot.
+export type RoleGate = { canSign: true } | { canSign: false; reason: string };
+
+const REOWN_PROJECT_ID = import.meta.env.VITE_REOWN_PROJECT_ID as string | undefined;
+const WalletControls = lazy(() => import("./WalletControls"));
+
+type Props = {
+  onChanged: () => void;
+  revoked: boolean;
+  deployments: Deployments | null;
+  label: string;
+  rpc: string;
+};
+
+/// The two human roles of the story. Under `bun run dev` they sign through the dev server, which holds their
+/// keys. Anywhere else (the hosted build) they sign with a connected wallet, when a Reown project id is set.
+export function Controls(props: Props) {
+  const [status, setStatus] = useState<Status | null | undefined>(undefined);
 
   useEffect(() => {
     fetch("/api/demo/status", { cache: "no-store" })
@@ -21,42 +39,136 @@ export function Controls({ onChanged, revoked }: { onChanged: () => void; revoke
       .catch(() => setStatus(null));
   }, []);
 
-  if (!status?.enabled) return null;
+  if (status === undefined) return null;
+  if (status?.enabled) return <ServerControls status={status} {...props} />;
+  if (!REOWN_PROJECT_ID || !props.deployments) return null;
+  return (
+    <Suspense fallback={null}>
+      <WalletControls
+        projectId={REOWN_PROJECT_ID}
+        rpc={props.rpc}
+        deployments={props.deployments}
+        label={props.label}
+        revoked={props.revoked}
+        onChanged={props.onChanged}
+      />
+    </Suspense>
+  );
+}
 
-  const call = async (
-    key: string,
-    path: string,
-    body: Record<string, unknown>,
-    set: (o: Outcome) => void,
-    render: (r: Record<string, unknown>) => Outcome,
-  ) => {
+/// Dev server mode: keys from the repo root .env, never in the browser.
+function ServerControls({ status, onChanged, revoked }: Props & { status: Status }) {
+  const post = async (path: string, body: Record<string, unknown>) => {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok) throw new Error(String(data.error ?? `HTTP ${res.status}`));
+    return data;
+  };
+  const tone = (r: Record<string, unknown>) => (r.status === "success" ? "ok" : "bad");
+  const actions: RoleActions = {
+    tighten: async (cap) => {
+      const r = await post("/api/demo/tighten", { cap });
+      return { tone: tone(r), text: `Cap set to ${cap} lUSD.`, txHash: String(r.txHash) };
+    },
+    forbid: async () => {
+      const r = await post("/api/demo/forbid", {});
+      const results = r.results as { ok: boolean; text: string }[];
+      return {
+        tone: results.every((x) => x.ok) ? "ok" : "bad",
+        text: results.map((x) => x.text).join(" · "),
+      };
+    },
+    slippage: async (bps) => {
+      const r = await post("/api/demo/slippage", { bps });
+      return {
+        tone: tone(r),
+        text: `Max slippage set to ${bps} bps (${Number(bps) / 100}%).`,
+        txHash: String(r.txHash),
+      };
+    },
+    cut: async () => {
+      const r = await post("/api/demo/cut", {});
+      return {
+        tone: tone(r),
+        text: `${status.name} cut, expiry ${String(r.expiry)}.`,
+        txHash: String(r.txHash),
+      };
+    },
+  };
+  const open: RoleGate = { canSign: true };
+  return (
+    <RoleCards
+      actions={actions}
+      riskManager={status.riskManager}
+      owner={status.owner}
+      riskGate={open}
+      ownerGate={open}
+      revoked={revoked}
+      onChanged={onChanged}
+    />
+  );
+}
+
+type CardsProps = {
+  actions: RoleActions;
+  riskManager: string | null;
+  owner: string | null;
+  riskGate: RoleGate;
+  ownerGate: RoleGate;
+  revoked: boolean;
+  onChanged: () => void;
+  /// Rendered above the two roles, e.g. the wallet bar.
+  header?: ReactNode;
+  /// Explorer transaction URL prefix, e.g. `https://sepolia.etherscan.io/tx/`.
+  txUrl?: string;
+};
+
+export function RoleCards({
+  actions,
+  riskManager,
+  owner,
+  riskGate,
+  ownerGate,
+  revoked,
+  onChanged,
+  header,
+  txUrl,
+}: CardsProps) {
+  const [cap, setCap] = useState("10");
+  const [slippage, setSlippage] = useState("50");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [riskOut, setRiskOut] = useState<Outcome>(null);
+  const [ownerOut, setOwnerOut] = useState<Outcome>(null);
+
+  const run = async (key: string, set: (o: Outcome) => void, action: () => Promise<Outcome>) => {
     setBusy(key);
     set({ tone: "info", text: "Sending…" });
     try {
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json()) as Record<string, unknown>;
-      if (!res.ok) throw new Error(String(data.error ?? `HTTP ${res.status}`));
-      set(render(data));
+      set(await action());
       onChanged();
     } catch (err) {
-      set({ tone: "bad", text: err instanceof Error ? err.message : String(err) });
+      set({ tone: "bad", text: errorText(err) });
     } finally {
       setBusy(null);
     }
   };
 
+  const riskOff = busy !== null || revoked || !riskGate.canSign;
+  const ownerOff = busy !== null || revoked || !ownerGate.canSign;
+
   return (
     <section className="controls" aria-label="controls">
+      {header}
       <div className="role">
         <div className="role-head">
           <h2 className="role-name">Risk manager</h2>
-          {status.riskManager && (
-            <span className="addr hint" title={status.riskManager}>
-              {shortHex(status.riskManager)}
+          {riskManager && (
+            <span className="addr hint" title={riskManager}>
+              {shortHex(riskManager)}
             </span>
           )}
         </div>
@@ -68,52 +180,41 @@ export function Controls({ onChanged, revoked }: { onChanged: () => void; revoke
           <label className="field">
             <span>daily cap</span>
             <input
+              id="risk-cap"
               value={cap}
               onChange={(e) => setCap(e.target.value)}
               inputMode="decimal"
               size={8}
-              disabled={busy !== null || revoked}
+              disabled={riskOff}
             />
             <span className="unit">lUSD</span>
           </label>
           <button
             className="btn"
-            disabled={busy !== null || revoked || !/^\d+(\.\d+)?$/.test(cap)}
-            onClick={() =>
-              call("tighten", "/api/demo/tighten", { cap }, setRiskOut, (r) => ({
-                tone: r.status === "success" ? "ok" : "bad",
-                text: `Cap set to ${cap} lUSD. Tx ${shortHex(String(r.txHash), 10, 6)}`,
-              }))
-            }
+            disabled={riskOff || !/^\d+(\.\d+)?$/.test(cap)}
+            onClick={() => run("tighten", setRiskOut, () => actions.tighten(cap))}
           >
             {busy === "tighten" ? "Sending…" : "Tighten the leash"}
           </button>
           <button
             className="ghost"
             disabled={busy !== null}
-            title="Try unregister, setAddress, setText(leash.quote) and clearing leash.maxSlippageBps as the risk manager. All four must revert."
-            onClick={() =>
-              call("forbid", "/api/demo/forbid", {}, setRiskOut, (r) => {
-                const results = r.results as { ok: boolean; text: string }[];
-                return {
-                  tone: results.every((x) => x.ok) ? "ok" : "bad",
-                  text: results.map((x) => x.text).join(" · "),
-                };
-              })
-            }
+            title="Simulate unregister, setAddress, setText(leash.quote) and clearing leash.maxSlippageBps as the risk manager. All four must revert."
+            onClick={() => run("forbid", setRiskOut, actions.forbid)}
           >
             {busy === "forbid" ? "Trying…" : "Try to revoke"}
           </button>
         </div>
-        {riskOut && <div className={`outcome ${riskOut.tone}`}>{riskOut.text}</div>}
+        {!riskGate.canSign && <p className="role-gate">{riskGate.reason}</p>}
+        <OutcomeLine outcome={riskOut} txUrl={txUrl} />
       </div>
 
       <div className="role owner">
         <div className="role-head">
           <h2 className="role-name">Owner</h2>
-          {status.owner && (
-            <span className="addr hint" title={status.owner}>
-              {shortHex(status.owner)}
+          {owner && (
+            <span className="addr hint" title={owner}>
+              {shortHex(owner)}
             </span>
           )}
         </div>
@@ -125,42 +226,65 @@ export function Controls({ onChanged, revoked }: { onChanged: () => void; revoke
           <label className="field">
             <span>max slippage</span>
             <input
+              id="owner-slippage"
               value={slippage}
               onChange={(e) => setSlippage(e.target.value)}
               inputMode="numeric"
               size={6}
-              disabled={busy !== null || revoked}
+              disabled={ownerOff}
               title={slippageInputError(slippage) ?? `${Number(slippage) / 100}% of the pool price`}
             />
             <span className="unit">bps</span>
           </label>
           <button
             className="btn"
-            disabled={busy !== null || revoked || slippageInputError(slippage) !== null}
-            onClick={() =>
-              call("slippage", "/api/demo/slippage", { bps: slippage }, setOwnerOut, (r) => ({
-                tone: r.status === "success" ? "ok" : "bad",
-                text: `Max slippage set to ${slippage} bps (${Number(slippage) / 100}%). Tx ${shortHex(String(r.txHash), 10, 6)}`,
-              }))
-            }
+            disabled={ownerOff || slippageInputError(slippage) !== null}
+            onClick={() => run("slippage", setOwnerOut, () => actions.slippage(slippage))}
           >
             {busy === "slippage" ? "Sending…" : "Set slippage"}
           </button>
           <button
             className="btn danger"
-            disabled={busy !== null || revoked}
-            onClick={() =>
-              call("cut", "/api/demo/cut", {}, setOwnerOut, (r) => ({
-                tone: r.status === "success" ? "ok" : "bad",
-                text: `${status.name} cut. Tx ${shortHex(String(r.txHash), 10, 6)}, expiry ${String(r.expiry)}`,
-              }))
-            }
+            disabled={ownerOff}
+            onClick={() => run("cut", setOwnerOut, actions.cut)}
           >
             {busy === "cut" ? "Cutting…" : revoked ? "Leash cut" : "Cut the leash"}
           </button>
         </div>
-        {ownerOut && <div className={`outcome ${ownerOut.tone}`}>{ownerOut.text}</div>}
+        {!ownerGate.canSign && <p className="role-gate">{ownerGate.reason}</p>}
+        <OutcomeLine outcome={ownerOut} txUrl={txUrl} />
       </div>
     </section>
   );
+}
+
+function OutcomeLine({ outcome, txUrl }: { outcome: Outcome; txUrl?: string }) {
+  if (!outcome) return null;
+  return (
+    <div className={`outcome ${outcome.tone}`}>
+      {outcome.text}
+      {outcome.txHash && (
+        <>
+          {" "}
+          Tx{" "}
+          {txUrl ? (
+            <a href={`${txUrl}${outcome.txHash}`} target="_blank" rel="noreferrer">
+              {shortHex(outcome.txHash, 10, 6)}
+            </a>
+          ) : (
+            shortHex(outcome.txHash, 10, 6)
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/// viem errors carry a one line `shortMessage`; a rejected wallet prompt should read as such.
+function errorText(err: unknown): string {
+  const e = err as { shortMessage?: string; message?: string; name?: string };
+  if (e?.name === "UserRejectedRequestError" || /rejected/i.test(e?.shortMessage ?? "")) {
+    return "Signature rejected in the wallet, nothing was sent.";
+  }
+  return e?.shortMessage ?? e?.message ?? String(err);
 }

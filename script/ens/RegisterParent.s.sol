@@ -14,6 +14,8 @@ import {LeashOrgLib} from "./LeashOrgLib.sol";
 ///         before `MAX_COMMITMENT_AGE` (24 h). On anvil: `cast rpc evm_increaseTime 61 && cast rpc evm_mine`.
 ///      The secret is `keccak256("leash", label, owner)` so `reveal()` recomputes it. `subregistry` and
 ///      `resolver` stay zero here, `DeployOrgRegistry` sets the subregistry from the owner's token roles.
+///      Duration: env `PARENT_DURATION` in seconds, default the registrar minimum (28 days). Both steps must see
+///      the same value, the commitment covers it.
 contract RegisterParent is EnsScriptBase {
     /// @dev Mint 10% over the quoted price so a price drift between quote and reveal does not break the demo.
     uint256 internal constant PRICE_MARGIN_BPS = 1000;
@@ -24,7 +26,7 @@ contract RegisterParent is EnsScriptBase {
     function commit() external {
         address owner = _owner();
         string memory label = _parentLabel();
-        uint64 duration = REGISTRAR.MIN_REGISTER_DURATION();
+        uint64 duration = _duration();
 
         _requireNotDelegated(owner, "owner");
         require(REGISTRAR.isAvailable(label), "RegisterParent: label not available");
@@ -60,7 +62,7 @@ contract RegisterParent is EnsScriptBase {
     function reveal() external {
         address owner = _owner();
         string memory label = _parentLabel();
-        uint64 duration = REGISTRAR.MIN_REGISTER_DURATION();
+        uint64 duration = _duration();
         bytes32 secret = LeashOrgLib.parentSecret(label, owner);
 
         vm.startBroadcast(_ownerPk());
@@ -78,6 +80,13 @@ contract RegisterParent is EnsScriptBase {
     }
 
     // ============ Internal functions ============
+
+    function _duration() internal view returns (uint64) {
+        uint64 min = REGISTRAR.MIN_REGISTER_DURATION();
+        uint64 duration = uint64(vm.envOr("PARENT_DURATION", uint256(min)));
+        require(duration >= min, "RegisterParent: PARENT_DURATION below the registrar minimum");
+        return duration;
+    }
 
     function _commitment(string memory label, address owner, uint64 duration) internal pure returns (bytes32) {
         return LeashOrgLib.parentRegistrationCommitment(

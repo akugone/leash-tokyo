@@ -113,8 +113,9 @@ export type DashboardConfig = {
   label: string;
 };
 
+/// Build time default RPC: `VITE_LEASH_RPC` (`.env.production` points the hosted build at Sepolia), else anvil.
 export const DEFAULT_CONFIG: DashboardConfig = {
-  rpc: "http://127.0.0.1:8545",
+  rpc: import.meta.env?.VITE_LEASH_RPC || "http://127.0.0.1:8545",
   deployments: "/deployments.json",
   label: "trader-1",
 };

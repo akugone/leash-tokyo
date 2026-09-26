@@ -100,7 +100,13 @@ export function App() {
 
         <div className="ops">
           <AgentFeed onActivity={dash.refreshNow} />
-          <Controls onChanged={dash.refreshNow} revoked={status === "revoked"} />
+          <Controls
+            onChanged={dash.refreshNow}
+            revoked={status === "revoked"}
+            deployments={deployments}
+            label={config.label}
+            rpc={config.rpc}
+          />
         </div>
 
         <Cards snapshot={snapshot} deployments={deployments} />
