@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { slippageInputError } from "../lib/leash";
 import { errorText, useSigner, type Outcome } from "./signer";
 import { CopyHex } from "./CopyHex";
@@ -8,17 +8,30 @@ type Props = {
   onChanged: () => void;
   /// Revoked name: open the New agent page prefilled with this name and its last policy.
   onReissue: () => void;
+  /// The selected agent's policy as the hook reads it, to prefill the inputs. Null until read, or when the
+  /// record is empty (no slippage bound).
+  currentCap: string | null;
+  currentBps: string | null;
 };
 
 /// The two human roles of the story on the selected agent: the risk manager tightens, the owner narrows the
 /// slippage, cuts the leash, or issues the name again once cut.
-export function RoleCards({ revoked, onChanged, onReissue }: Props) {
+export function RoleCards({ revoked, onChanged, onReissue, currentCap, currentBps }: Props) {
   const signer = useSigner();
   const [cap, setCap] = useState("10");
   const [slippage, setSlippage] = useState("50");
   const [busy, setBusy] = useState<string | null>(null);
   const [riskOut, setRiskOut] = useState<Outcome>(null);
   const [ownerOut, setOwnerOut] = useState<Outcome>(null);
+
+  // Start from the agent's real policy, and follow it when it changes on chain or another tab is selected.
+  // A poll that reads the same value leaves what the user is typing alone.
+  useEffect(() => {
+    if (currentCap !== null) setCap(currentCap);
+  }, [currentCap]);
+  useEffect(() => {
+    if (currentBps !== null) setSlippage(currentBps);
+  }, [currentBps]);
 
   if (!signer) return null;
   const { actions, riskGate, ownerGate, riskManager, owner, walletBar, txUrl } = signer;

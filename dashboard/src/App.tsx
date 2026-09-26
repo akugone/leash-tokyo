@@ -180,7 +180,15 @@ export function App() {
                   onActivity={changed}
                   chain={{ items: activity.items, latest: activity.latest, now, node, txUrl }}
                 />
-                <RoleCards revoked={status === "revoked"} onChanged={changed} onReissue={reissue} />
+                <RoleCards
+                  revoked={status === "revoked"}
+                  onChanged={changed}
+                  onReissue={reissue}
+                  currentCap={
+                    snapshot?.policy.value ? formatUnits(snapshot.policy.value.cap, 18) : null
+                  }
+                  currentBps={snapshot?.policy.value?.maxSlippageBps?.toString() ?? null}
+                />
               </div>
 
               <Cards snapshot={snapshot} deployments={deployments} />

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { advanceClock, chainNow, sticky, type Field } from "./chain";
+import { advanceClock, chainNow, rescanFrom, RESCAN_BLOCKS, sticky, type Field } from "./chain";
 
 describe("advanceClock", () => {
   test("keeps the anchor that puts chain time furthest ahead", () => {
@@ -47,5 +47,15 @@ describe("sticky", () => {
   test("a fresh value always wins", () => {
     const next: Field<bigint> = { value: 30n, error: null };
     expect(sticky(ok, next)).toBe(next);
+  });
+});
+
+describe("rescanFrom", () => {
+  test("reads the last blocks again, so a lagging RPC node cannot hide their events", () => {
+    expect(rescanFrom(100n)).toBe(100n - RESCAN_BLOCKS + 1n);
+    expect(rescanFrom(100n) <= 100n).toBe(true);
+  });
+  test("never goes below block zero", () => {
+    expect(rescanFrom(3n)).toBe(0n);
   });
 });

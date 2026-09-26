@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PublicClient } from "viem";
-import { fetchAgentLabels, fetchExpiries, LOG_LOOKBACK } from "./lib/chain";
+import { fetchAgentLabels, fetchExpiries, LOG_LOOKBACK, rescanFrom } from "./lib/chain";
 import { lookbackStart, type Deployments } from "./lib/leash";
 
 /// One agent name of the org and its current expiry (zero once cut, null until read).
@@ -34,7 +34,7 @@ export function useAgents(client: PublicClient | null, deployments: Deployments 
         const latest = await client.getBlockNumber();
         const from =
           scannedTo.current !== null
-            ? scannedTo.current + 1n
+            ? rescanFrom(scannedTo.current)
             : deployments.orgRegistryBlock
               ? BigInt(deployments.orgRegistryBlock)
               : lookbackStart(latest, LOG_LOOKBACK);
