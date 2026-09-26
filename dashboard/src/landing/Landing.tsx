@@ -488,8 +488,8 @@ function Market() {
     { label: "Works with any router", v: [true, false, "partial", false, true] },
   ];
   const value: { t: string; d: string }[] = [
-    { t: "ENS is the product, not decoration", d: "Registry, expiry, resolver and access control each carry a real role. Strip ENS out and the design collapses into a bespoke allowlist contract." },
-    { t: "Enforcement where the trade happens", d: "The hook sits in the pool. A compromised agent cannot route around it, because the check is part of the swap." },
+    { t: "ENSv2 is the product, not decoration", d: "Registry, expiry, resolver and access control each carry a real role. Strip ENS out and the policy has nowhere to live: a bespoke allowlist contract." },
+    { t: "So is Uniswap v4", d: "The hook sits in the pool, so the check is part of the swap and a compromised agent cannot route around it. Strip it out and you are back to a trusted router." },
     { t: "No oracle, no custody change", d: "Caps are counted on the real BalanceDelta. Funds stay where they are. Nothing new to trust but the org's own registry." },
   ];
   const mark = (v: boolean | "partial") =>
