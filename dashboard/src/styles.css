@@ -648,6 +648,8 @@ textarea {
 
 /* The activity feed reads like the landing's hook console: a window bar, then mono lines. */
 .feed {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow);
 }
@@ -694,11 +696,13 @@ textarea {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 18%, transparent);
 }
 
+/* Fills the card, which the grid stretches to the role cards' height; scrolls past that. */
 .feed-list {
+  flex: 1 1 0;
+  min-height: 320px;
   list-style: none;
   margin: 0;
   padding: 6px 0;
-  max-height: 320px;
   overflow-y: auto;
   font-size: 13px;
 }
