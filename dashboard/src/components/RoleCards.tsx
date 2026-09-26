@@ -58,7 +58,9 @@ export function RoleCards({
     }
   };
 
-  const riskOff = busy !== null || revoked || !riskGate.canSign;
+  // No role on this agent: "tighten the leash" only simulates, so it needs no wallet and shows ENS refusing.
+  const simulateOnly = riskDelegated === false;
+  const riskOff = busy !== null || revoked || (!riskGate.canSign && !simulateOnly);
   const ownerOff = busy !== null || revoked || !ownerGate.canSign;
 
   return (
@@ -78,10 +80,11 @@ export function RoleCards({
           <code>leash.tokens</code>, granted on the agent's own resolver: no power over any other
           agent. Nothing else, not even <code>leash.maxSlippageBps</code>.
         </p>
-        {riskDelegated === false && (
+        {simulateOnly && (
           <p className="role-gate">
-            No role on this agent's resolver: the owner issued it without a risk manager. Tightening
-            reverts with <code>EACUnauthorizedAccountRoles</code>.
+            No role on this agent's resolver: the owner issued it without giving the risk manager
+            its role. <b>Tighten the leash</b> is simulated first, ENS answers{" "}
+            <code>EACUnauthorizedAccountRoles</code>, and nothing is sent. No wallet needed.
           </p>
         )}
         <div className="role-row">
@@ -100,9 +103,14 @@ export function RoleCards({
           <button
             className="btn"
             disabled={riskOff || !/^\d+(\.\d+)?$/.test(cap)}
+            title={
+              simulateOnly
+                ? "Simulated as the risk manager: ENS refuses, nothing is sent"
+                : "Simulated first, then signed by the risk manager"
+            }
             onClick={() => run("tighten", setRiskOut, () => actions.tighten(cap))}
           >
-            {busy === "tighten" ? "Sending…" : "Tighten the leash"}
+            {busy === "tighten" ? (simulateOnly ? "Simulating…" : "Sending…") : "Tighten the leash"}
           </button>
           <button
             className="ghost"
@@ -113,7 +121,7 @@ export function RoleCards({
             {busy === "forbid" ? "Trying…" : "Try to revoke"}
           </button>
         </div>
-        {!riskGate.canSign && <p className="role-gate">{riskGate.reason}</p>}
+        {!riskGate.canSign && !simulateOnly && <p className="role-gate">{riskGate.reason}</p>}
         <OutcomeLine outcome={riskOut} txUrl={txUrl} />
       </div>
 

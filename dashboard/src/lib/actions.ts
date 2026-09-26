@@ -11,6 +11,7 @@ import {
   parseEventLogs,
   parseUnits,
   zeroAddress,
+  type Abi,
   type Address,
   type Log,
   type PublicClient,
@@ -144,6 +145,39 @@ export function revertSelector(err: unknown): string | null {
     (found as { raw?: string; data?: string } | null)?.raw ??
     (found as { data?: string } | null)?.data;
   return typeof data === "string" && data.length >= 10 ? data.slice(0, 10).toLowerCase() : null;
+}
+
+/// Simulates `call` from `account` before anything is signed. Null when it would go through, otherwise the
+/// refusal: a write the chain would revert is never sent.
+export async function preflight(
+  client: Pick<PublicClient, "simulateContract">,
+  call: { address: Address; abi: Abi; functionName: string; args: readonly unknown[] },
+  account: Address,
+): Promise<{ ens: boolean; reason: string } | null> {
+  try {
+    await client.simulateContract({ ...call, account } as never);
+    return null;
+  } catch (err) {
+    return refusal(err);
+  }
+}
+
+/// Why a simulation reverted: `ens` when Enhanced Access Control refused the account.
+export function refusal(err: unknown): { ens: boolean; reason: string } {
+  const sel = revertSelector(err);
+  if (sel === EAC_UNAUTHORIZED) return { ens: true, reason: "EACUnauthorizedAccountRoles" };
+  const e = err as { shortMessage?: string; message?: string };
+  return {
+    ens: false,
+    reason: sel ? `revert ${sel}` : (e?.shortMessage ?? e?.message ?? String(err)),
+  };
+}
+
+/// What the risk manager reads when the simulation of "tighten the leash" is refused. Nothing was sent.
+export function tightenRefusalText(label: string, r: { ens: boolean; reason: string }): string {
+  return r.ens
+    ? `Refused by ENS, nothing sent: ${r.reason}. The risk manager holds no role on ${label}'s resolver (simulated before signing).`
+    : `Simulation reverted, nothing sent: ${r.reason}.`;
 }
 
 /// "PASS <what> -> EACUnauthorizedAccountRoles" when the simulation reverted as it must.

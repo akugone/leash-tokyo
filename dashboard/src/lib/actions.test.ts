@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  BaseError,
   decodeFunctionData,
   encodeAbiParameters,
   encodeEventTopics,
@@ -9,6 +10,8 @@ import {
   type Log,
 } from "viem";
 import {
+  refusal,
+  tightenRefusalText,
   AGENT_TOKEN_ROLES,
   agentLabelError,
   agentResolverSalt,
@@ -152,5 +155,27 @@ describe("agentLabelError", () => {
     for (const label of ["", "Trader", "a.b", "-x", "x-", "a".repeat(64)]) {
       expect(agentLabelError(label)).not.toBeNull();
     }
+  });
+});
+
+describe("tighten preflight", () => {
+  // A viem error whose cause carries the revert data, as simulateContract throws it.
+  const reverted = (data: Hex) =>
+    new BaseError("reverted", { cause: { data } as unknown as Error });
+
+  test("an ENS access control refusal is named, and says nothing was sent", () => {
+    const r = refusal(reverted(`0x4b27a133${"00".repeat(96)}`));
+    expect(r).toEqual({ ens: true, reason: "EACUnauthorizedAccountRoles" });
+    expect(tightenRefusalText("trader-2", r)).toBe(
+      "Refused by ENS, nothing sent: EACUnauthorizedAccountRoles. The risk manager holds no role on trader-2's resolver (simulated before signing).",
+    );
+  });
+
+  test("any other revert keeps its selector", () => {
+    const r = refusal(reverted("0xdeadbeef00"));
+    expect(r).toEqual({ ens: false, reason: "revert 0xdeadbeef" });
+    expect(tightenRefusalText("trader-2", r)).toBe(
+      "Simulation reverted, nothing sent: revert 0xdeadbeef.",
+    );
   });
 });

@@ -6,7 +6,9 @@
  *   DELETE /api/agent-events          clear the feed between rehearsals
  *   GET  /api/demo/status             {enabled, riskManager, owner, rpc}
  *   Every action below takes an optional `label` (the dashboard's selected tab), default the record's agentLabel.
- *   POST /api/demo/tighten {cap}      risk-manager: setText(leash.dailyNotional) on the agent's own resolver
+ *   POST /api/demo/tighten {cap}      risk-manager: setText(leash.dailyNotional) on the agent's own resolver,
+ *                                     simulated first: an ENS refusal comes back as {status: "refused", text},
+ *                                     and nothing is sent
  *   POST /api/demo/forbid             risk-manager tries unregister / setAddress / setText(leash.quote) /
  *                                     setText(leash.maxSlippageBps): must revert
  *   POST /api/demo/cut                owner: unregister(labelId) on the org registry
@@ -48,10 +50,12 @@ import {
   grantRiskManagerCall,
   issueCalls,
   liveResolver,
+  preflight,
   registryWriteAbi,
   revertSelector,
   slippageCall,
   tightenCall,
+  tightenRefusalText,
   type LeashTarget,
 } from "../src/lib/actions";
 import { labelId, slippageInputError } from "../src/lib/leash";
@@ -144,10 +148,18 @@ async function tighten(capHuman: string, label?: string) {
   push({
     source: "risk",
     kind: "intent",
-    text: `risk-manager sets leash.dailyNotional to ${capHuman} lUSD (${raw})`,
+    text: `risk-manager sets leash.dailyNotional of ${ctx.fullName} to ${capHuman} lUSD (${raw})`,
   });
+  // Simulated first: a write ENS would refuse is never sent.
+  const call = tightenCall(await ctx.target(), capHuman);
+  const refused = await preflight(ctx.publicClient, call, account.address);
+  if (refused) {
+    const text = tightenRefusalText(ctx.agentLabel, refused);
+    push({ source: "risk", kind: refused.ens ? "denied" : "error", text });
+    return { status: "refused", text };
+  }
   const txHash = await client.writeContract({
-    ...tightenCall(await ctx.target(), capHuman),
+    ...call,
     account,
     chain: client.chain,
   });
