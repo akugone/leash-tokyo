@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeErrorResult, keccak256, toHex, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { LEASH_HOOK_ABI, WRAPPED_ERROR_ABI } from "./abi.ts";
+import { LEASH_HOOK_ABI, LEASH_VAULT_ABI, WRAPPED_ERROR_ABI } from "./abi.ts";
 import { FORCE_DEFAULT_AMOUNT, chooseAmount, chooseSlippage, parseCliArgs, slippageText } from "./bot.ts";
 import { decodeRevertData, explainRevert } from "./errors.ts";
 import { bpsText } from "./leash.ts";
@@ -132,6 +132,19 @@ describe("errors", () => {
     const decoded = decodeRevertData(encodeErrorResult({ abi: LEASH_HOOK_ABI, errorName: "IntentMismatch", args: [] }));
     expect(decoded.name).toBe("IntentMismatch");
     expect(decoded.target).toBeUndefined();
+  });
+
+  test("decodes the vault's own NotSigner, unwrapped", () => {
+    const signer = "0x1000000000000000000000000000000000000001";
+    const caller = "0x3000000000000000000000000000000000000003";
+    const decoded = decodeRevertData(
+      encodeErrorResult({ abi: LEASH_VAULT_ABI, errorName: "NotSigner", args: [signer, caller] }),
+    );
+    expect(decoded.name).toBe("NotSigner");
+    expect(decoded.target).toBeUndefined();
+    expect(explainRevert(decoded, ctx)).toBe(
+      `NotSigner: intent signed by ${signer} but sent by ${caller}, only the signer may trade from the vault`,
+    );
   });
 
   test("decodes Error(string) and unknown selectors", () => {
