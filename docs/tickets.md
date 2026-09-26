@@ -15,7 +15,7 @@ Priorities: **P0** = no demo without it, **P1** = makes the submission credible.
 | Slippage check       | Out of scope. The daily cap and revocation carry the demo.                                                                                                                                                                   |
 | ENSv2 dependency     | Vendored minimal interfaces under `src/interfaces/ens/`. Tests run against a Sepolia fork, not against the ENS monorepo.                                                                                                     |
 
-### Policy records on `trader-1.acme.eth`
+### Policy records on `trader-1.leash.eth`
 
 | Record                | Kind           | Example                 | Read by hook as                                           |
 | --------------------- | -------------- | ----------------------- | --------------------------------------------------------- |
@@ -28,7 +28,7 @@ Priorities: **P0** = no demo without it, **P1** = makes the submission credible.
 
 ```solidity
 struct SwapIntent {
-    bytes32 node;            // namehash("trader-1.acme.eth")
+    bytes32 node;            // namehash("trader-1.leash.eth")
     bytes32 poolId;          // PoolId.unwrap(key.toId())
     bool zeroForOne;
     int256 amountSpecified;
@@ -89,12 +89,12 @@ Acceptance:
 
 ## Epic 1: ENS namespace on Sepolia
 
-### L-03 Register `acme.eth` (P0, 2h)
+### L-03 Register `leash.eth` (P0, 2h)
 
 - Mint MockUSDC (its `mint` has no access control), approve `ETHRegistrar`.
 - Commit then reveal via `ETHRegistrar.register(label, owner, secret, subregistry, resolver, duration, paymentToken, referrer)`. Pass `subregistry = address(0)` for now, it is set in L-04.
 - Script: `script/ens/RegisterParent.s.sol`. Owner is the org multisig or a dedicated "owner" key.
-- Pick a label unlikely to be taken. `acme` is a placeholder.
+- Pick a label unlikely to be taken. The live deployment uses `leash`.
 
 Acceptance:
 
@@ -104,13 +104,13 @@ Acceptance:
 ### L-04 Deploy the org registry (P0, 3h)
 
 - Preferred path: `VerifiableFactory.deployProxy(UserRegistryImpl, salt, initialize(owner, rootRoles))`. Root roles for owner: `ROLE_REGISTRAR | ROLE_UNREGISTER | ROLE_RENEW | ROLE_SET_RESOLVER | ROLE_SET_SUBREGISTRY` plus their `_ADMIN` bits.
-- Then `ETHRegistry.setSubregistry(acmeTokenId, orgRegistry)` from the owner key.
+- Then `ETHRegistry.setSubregistry(parentTokenId, orgRegistry)` from the owner key.
 - Fallback if the factory path fights back: deploy `PermissionedRegistry(labelStore, owner, rootRoles)` directly from vendored source. Same interface for the hook.
 - Script: `script/ens/DeployOrgRegistry.s.sol`.
 
 Acceptance:
 
-- [x] `ETHRegistry.getSubregistry("acme") == orgRegistry`
+- [x] `ETHRegistry.getSubregistry("leash") == orgRegistry`
 - [x] `orgRegistry.hasRootRoles(ROLE_REGISTRAR, owner) == true`
 
 ### L-05 Deploy the org PermissionedResolver (P0, 2h)
@@ -126,7 +126,7 @@ Acceptance:
 ### L-06 Issue the agent subname and write its policy (P0, 2h)
 
 - `orgRegistry.register("trader-1", agentNameOwner, IRegistry(0), orgResolver, tokenRoles, expiry)`. `agentNameOwner` is the org owner, **not** the agent key. Expiry configurable (default now + 7 days).
-- Records on `node = namehash("trader-1.acme.eth")`: `setAddr(node, agent)`, `setText(node, "leash.quote", …)`, `setText(node, "leash.dailyNotional", …)`, `setText(node, "leash.tokens", …)`. Use `multicall`.
+- Records on `node = namehash("trader-1.leash.eth")`: `setAddr(node, agent)`, `setText(node, "leash.quote", …)`, `setText(node, "leash.dailyNotional", …)`, `setText(node, "leash.tokens", …)`. Use `multicall`.
 - Script: `script/ens/IssueAgent.s.sol` parameterised by label, agent address, expiry, cap.
 
 Acceptance:
@@ -173,7 +173,7 @@ Acceptance:
 
 ### L-10 `LeashHook.beforeSwap` (P0, 5h)
 
-Constructor: `poolManager`, `orgRegistry`, `parentNode` (namehash of `acme.eth`). Flags: `BEFORE_SWAP | AFTER_SWAP`.
+Constructor: `poolManager`, `orgRegistry`, `parentNode` (namehash of `leash.eth`). Flags: `BEFORE_SWAP | AFTER_SWAP`.
 
 Checks, in order, each with its own custom error:
 
@@ -298,7 +298,7 @@ Acceptance:
 
 Acceptance:
 
-- [ ] Public URL working for `trader-1.acme.eth`
+- [ ] Public URL working for `trader-1.leash.eth`
 - [x] Revocation reflected within 10 seconds of the tx (verified on the anvil fork: one 5 s poll)
 
 ### L-19 Submission deliverables (P0, 3h)

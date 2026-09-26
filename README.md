@@ -52,8 +52,8 @@ There is no onchain answer to a simple question: *is this address still allowed 
 
 Leash turns an ENS name into the agent's credential, and a Uniswap v4 hook into the enforcement point.
 
-1. The organisation owns `acme.eth` and deploys its own **Permissioned Registry**.
-2. Each agent is issued a revocable subname with an expiry: `trader-1.acme.eth`.
+1. The organisation owns `leash.eth` and deploys its own **Permissioned Registry**.
+2. Each agent is issued a revocable subname with an expiry: `trader-1.leash.eth`.
 3. The agent's risk policy lives in its **Permissioned Resolver**: the agent address is the name's native `addr` record, and the daily notional cap, allowed tokens and maximum price impact per swap are text records, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`.
 4. **Enhanced Access Control** lets a `risk-manager` role hold `ROLE_SET_TEXT` scoped to just the `leash.dailyNotional` and `leash.tokens` keys, never the name itself, nor the owner-only `leash.maxSlippageBps`. Only the owner can revoke that role.
 5. The agent signs an EIP-712 `SwapIntent` (name, pool, direction, amount, nonce, deadline). `hookData` carries the label, the intent and the signature. A **Uniswap v4 hook** recovers the signer and compares it to the name's `addr` record: `beforeSwap` checks identity and the token allowlist, `afterSwap` counts the real quote token delta against the daily cap. No trusted router, any Uniswap v4 router works.

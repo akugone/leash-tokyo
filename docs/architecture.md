@@ -6,17 +6,17 @@ Working notes, not a spec. Expect churn.
 
 ### 1. Permissioned Registry (ENSv2)
 
-Deployed and owned by the organisation. Holds `acme.eth` and issues subnames.
+Deployed and owned by the organisation. Holds `leash.eth` and issues subnames.
 
 Responsibilities:
 
-- Issue `trader-N.acme.eth` with an owner and an expiry.
+- Issue `trader-N.leash.eth` with an owner and an expiry.
 - Revoke a subname immediately, on owner authority only.
 - Expose ownership and expiry to the hook in a single view call.
 
 ### 2. Permissioned Resolver
 
-Stores the agent's identity and policy on `trader-N.acme.eth`.
+Stores the agent's identity and policy on `trader-N.leash.eth`.
 
 Records:
 
