@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { advanceClock, chainNow, rescanFrom, RESCAN_BLOCKS, sticky, type Field } from "./chain";
+import {
+  advanceClock,
+  chainNow,
+  isWideLogQuery,
+  rescanFrom,
+  RESCAN_BLOCKS,
+  sticky,
+  type Field,
+} from "./chain";
 
 describe("advanceClock", () => {
   test("keeps the anchor that puts chain time furthest ahead", () => {
@@ -57,5 +65,25 @@ describe("rescanFrom", () => {
   });
   test("never goes below block zero", () => {
     expect(rescanFrom(3n)).toBe(0n);
+  });
+});
+
+describe("isWideLogQuery", () => {
+  test("up to 10 blocks stays on the main rpc", () => {
+    expect(isWideLogQuery([{ fromBlock: "0x1", toBlock: "0xa" }])).toBe(false);
+    expect(isWideLogQuery([{ fromBlock: "0x1", toBlock: "0xb" }])).toBe(true);
+  });
+  test("a block hash is narrow, a tag or a missing bound is wide", () => {
+    expect(isWideLogQuery([{ blockHash: "0xabc" }])).toBe(false);
+    expect(isWideLogQuery([{ fromBlock: "0x1", toBlock: "latest" }])).toBe(true);
+    expect(isWideLogQuery([{ toBlock: "0x5" }])).toBe(true);
+  });
+  test("the poll tail fits: rescan window plus two new blocks", () => {
+    const scannedTo = 1000n;
+    const from = rescanFrom(scannedTo);
+    const head = scannedTo + 2n;
+    expect(
+      isWideLogQuery([{ fromBlock: `0x${from.toString(16)}`, toBlock: `0x${head.toString(16)}` }]),
+    ).toBe(false);
   });
 });

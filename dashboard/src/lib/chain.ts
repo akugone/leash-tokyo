@@ -4,12 +4,15 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   createPublicClient,
+  custom,
   erc20Abi,
+  fallback,
   http,
   parseAbiItem,
   type Address,
   type Hex,
   type PublicClient,
+  type Transport,
 } from "viem";
 import { hookAbi, leashSwapEvent, registryAbi, resolverAbi } from "./abi";
 import {
@@ -114,6 +117,50 @@ export type Snapshot = {
 /// Multicall3, deployed at the same address on Sepolia and therefore on any anvil fork of it.
 const MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
 
+/// RPCs for wide `eth_getLogs` scans (the history read at load), when `rpc` only serves narrow ones. Comma
+/// separated, tried in order: a rate limited one hands over to the next.
+const LOGS_RPCS: string[] = (import.meta.env?.VITE_LEASH_LOGS_RPC ?? "")
+  .split(",")
+  .map((u: string) => u.trim())
+  .filter(Boolean);
+
+/// Widest `eth_getLogs` range sent to the main RPC, in blocks: Alchemy's free plan stops at 10. A poll's tail
+/// (`rescanFrom` plus the new blocks) fits in it.
+export const NARROW_LOG_BLOCKS = 10n;
+
+/// True when an `eth_getLogs` call spans more than `NARROW_LOG_BLOCKS`, or a range we cannot measure.
+export function isWideLogQuery(params: unknown): boolean {
+  const filter = (
+    params as { fromBlock?: string; toBlock?: string; blockHash?: string }[] | undefined
+  )?.[0];
+  if (!filter || filter.blockHash) return false;
+  const { fromBlock, toBlock } = filter;
+  if (!fromBlock?.startsWith("0x") || !toBlock?.startsWith("0x")) return true;
+  return BigInt(toBlock) - BigInt(fromBlock) + 1n > NARROW_LOG_BLOCKS;
+}
+
+const HTTP_OPTIONS = { timeout: 8_000, retryCount: 2, retryDelay: 400 } as const;
+
+/// Everything goes to `rpc`, except wide log scans, which go to `logsRpcs` when there are any.
+function routedTransport(rpc: string, logsRpcs: string[]): Transport {
+  const main = http(rpc, HTTP_OPTIONS);
+  if (logsRpcs.length === 0 || (logsRpcs.length === 1 && logsRpcs[0] === rpc)) return main;
+  const wide = fallback(logsRpcs.map((u) => http(u, HTTP_OPTIONS)));
+  return (config) => {
+    const [m, w] = [main(config), wide(config)];
+    return custom(
+      {
+        request: ({ method, params }: { method: string; params?: unknown }) =>
+          (method === "eth_getLogs" && isWideLogQuery(params) ? w : m).request({
+            method,
+            params,
+          } as never),
+      },
+      { retryCount: 0 },
+    )(config);
+  };
+}
+
 /// One poll reads about ten views. Multicall batching folds them into one `eth_call` on the same block, which
 /// keeps a public RPC under its rate limit and makes spent, remaining and cap consistent with each other.
 export function makeClient(rpc: string, chainId: number): PublicClient {
@@ -126,7 +173,7 @@ export function makeClient(rpc: string, chainId: number): PublicClient {
       contracts: { multicall3: { address: MULTICALL3 } },
     },
     batch: { multicall: { wait: 16 } },
-    transport: http(rpc, { timeout: 8_000, retryCount: 2, retryDelay: 400 }),
+    transport: routedTransport(rpc, LOGS_RPCS),
   });
 }
 

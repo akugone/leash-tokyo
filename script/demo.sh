@@ -200,6 +200,8 @@ dashboard)
     mkdir -p dashboard/public
     cp "$LEASH_DEPLOYMENTS_FILE" dashboard/public/deployments.json
     export RPC_URL="$RPC" VITE_LEASH_RPC="$RPC"
+    # Alchemy's free plan serves 10 block log queries: the history scan goes to public RPCs (dashboard/.env.production).
+    [ "$NETWORK" = sepolia ] && export VITE_LEASH_LOGS_RPC="${SEPOLIA_LOGS_RPC_URL:-https://sepolia.gateway.tenderly.co,https://ethereum-sepolia-rpc.publicnode.com}"
     echo "dashboard on $NETWORK: http://localhost:${PORT:-5173}/app?label=${AGENT_LABEL:-trader-1}"
     cd dashboard && exec bun run dev
     ;;
