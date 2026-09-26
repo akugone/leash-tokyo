@@ -108,7 +108,8 @@ function Hero() {
         </h1>
         <p className="lp-lede">
           Give an AI agent or a bot the right to trade for your treasury, within limits you set and
-          can pull back in one transaction. Name it, bound it, revoke it.
+          can pull back in one transaction. Name it, bound it, revoke it. Every agent gets its own ENS
+          name and its own ENSv2 resolver holding its limits.
         </p>
         <div className="lp-cta">
           <a className="lp-btn lp-btn-dark" href="#start">
@@ -130,6 +131,7 @@ function HeroConsole() {
     { ok: true, text: "trader-1.leash.eth  buy 25 lUSD of lETH", note: "swap settled · 10% of daily cap" },
     { ok: false, text: "trader-1.leash.eth  buy 300 lUSD of lETH", note: "DailyCapExceeded" },
     { ok: false, text: "risk-manager  unregister(trader-1)", note: "EACUnauthorizedAccountRoles" },
+    { ok: false, text: "risk-manager  tighten trader-2.leash.eth", note: "no role on trader-2's resolver" },
     { ok: false, text: "trader-1.leash.eth  buy 5 lUSD of lETH", note: "LeashRevoked" },
   ];
   return (
@@ -228,6 +230,7 @@ function Problems() {
     { icon: "chart", title: "Slippage bounds", body: "Cap the price impact of every swap with leash.maxSlippageBps. A looser price limit reverts with SlippageTooLoose." },
     { icon: "clock", title: "Time boxed mandates", body: "Give a subname an expiry. The mandate lapses on its own, no one has to remember." },
     { icon: "user", title: "Split duties", body: "A risk manager edits the limits, never the identity. Only the owner can issue or revoke." },
+    { icon: "key", title: "Its own resolver", body: "Each agent gets its own ENSv2 Permissioned Resolver. Its records live there alone, and a role granted on it covers that agent only." },
     { icon: "scissors", title: "Instant kill switch", body: "Cut the leash: unregister the subname and the next swap reverts with LeashRevoked." },
     { icon: "signature", title: "Router agnostic", body: "The agent signs an EIP-712 intent, so any Uniswap v4 router works. No bespoke frontend." },
   ];
@@ -268,16 +271,16 @@ function Problems() {
 function HowItWorks() {
   const steps: { n: string; title: string; body: string }[] = [
     { n: "1", title: "Own a namespace", body: "The org owns leash.eth and deploys its own ENSv2 Permissioned Registry." },
-    { n: "2", title: "Issue the agent", body: "Register trader-1.leash.eth with an expiry. Its addr record is the agent's key." },
-    { n: "3", title: "Write the policy", body: "Text records hold the quote token, daily cap, allowed tokens and max slippage." },
+    { n: "2", title: "Issue the agent", body: "Deploy its own Permissioned Resolver, then register trader-1.leash.eth pointing to it, with an expiry." },
+    { n: "3", title: "Write the policy", body: "Its resolver holds the addr record (the agent's key) and text records: quote, daily cap, tokens, max slippage." },
     { n: "4", title: "Sign and swap", body: "The agent signs a SwapIntent and passes it in hookData through any v4 router." },
     { n: "5", title: "Hook enforces", body: "Every swap is checked in the pool before and after it settles. See below." },
   ];
   const stack: { layer: string; role: string }[] = [
     { layer: "ENSv2 Permissioned Registry", role: "The org's namespace. Issues and revokes agent identities." },
     { layer: "Subname expiry", role: "Time boxed mandates that lapse on their own." },
-    { layer: "ENSv2 Permissioned Resolver", role: "Where the risk policy lives, read onchain by the hook on every swap." },
-    { layer: "Enhanced Access Control", role: "Per record delegation: the risk desk edits leash.dailyNotional, never the name." },
+    { layer: "ENSv2 Permissioned Resolver, one per agent", role: "The agent's own data: its risk policy and nothing else, read onchain by the hook on every swap." },
+    { layer: "Enhanced Access Control", role: "Per agent, per record delegation: the risk desk edits trader-1's leash.dailyNotional, never the name, never another agent." },
     { layer: "Uniswap v4 hook", role: "beforeSwap and afterSwap. The enforcement point, at the venue itself." },
     { layer: "EIP-712 SwapIntent", role: "Name, pool, direction, amount, nonce, deadline. Signed by the agent." },
   ];
@@ -299,7 +302,7 @@ function HowItWorks() {
             <h3 className="lp-h3">The policy, as ENS records</h3>
             <pre className="lp-code">
               <code>
-                <span className="lp-c">{"# trader-1.leash.eth"}</span>
+                <span className="lp-c">{"# trader-1.leash.eth, on its own Permissioned Resolver"}</span>
                 {"\naddr                 0xA162…4A0d"}
                 {"\nleash.quote          0x3EC7…lUSD"}
                 {"\nleash.dailyNotional  250000000000000000000"}
@@ -401,9 +404,9 @@ function GetStarted() {
       icon: "building",
       who: "Org owner",
       does: [
-        "Register the parent name and deploy the org registry, resolver and hook",
-        "Issue a subname per agent, with an expiry",
-        "Grant the risk-manager role on the policy keys only",
+        "Register the parent name and deploy the org registry and hook",
+        "Issue a subname per agent, with its own resolver and an expiry",
+        "Grant the risk-manager role per agent, on the policy keys only",
         "Set the slippage bound, leash.maxSlippageBps, which only the owner can change",
         "Cut the leash when needed",
       ],
@@ -413,7 +416,7 @@ function GetStarted() {
       who: "Risk manager",
       does: [
         "Watch spend against the cap on the dashboard",
-        "Tighten leash.dailyNotional or leash.tokens at any time",
+        "Tighten leash.dailyNotional or leash.tokens of the agents delegated to it, at any time",
         "Cannot mint, revoke or re-point an agent, nor loosen the slippage bound",
       ],
     },
@@ -453,7 +456,7 @@ function GetStarted() {
             <code>
               <span className="lp-c">{"# anvil fork of Sepolia, real ENSv2 + Uniswap v4"}</span>
               {"\nscript/demo.sh anvil"}
-              <span className="lp-c">{"\n\n# register leash.eth, deploy registry, resolver,\n# hook and pool, issue trader-1 with its policy"}</span>
+              <span className="lp-c">{"\n\n# register leash.eth, deploy registry, hook and pool,\n# issue trader-1 with its own resolver and policy"}</span>
               {"\nscript/demo.sh setup"}
               <span className="lp-c">{"\n\n# dashboard on http://localhost:5173/app"}</span>
               {"\ncd dashboard && bun run dev"}
@@ -488,7 +491,7 @@ function Market() {
     { label: "Works with any router", v: [true, false, "partial", false, true] },
   ];
   const value: { t: string; d: string }[] = [
-    { t: "ENSv2 is the product, not decoration", d: "Registry, expiry, resolver and access control each carry a real role. Strip ENS out and the policy has nowhere to live: a bespoke allowlist contract." },
+    { t: "ENSv2 is the product, not decoration", d: "Registry, expiry, one resolver per agent and access control each carry a real role. Strip ENS out and the policy has nowhere to live: a bespoke allowlist contract." },
     { t: "So is Uniswap v4", d: "The hook sits in the pool, so the check is part of the swap and a compromised agent cannot route around it. Strip it out and you are back to a trusted router." },
     { t: "No oracle, no custody change", d: "Caps are counted on the real BalanceDelta. Funds stay where they are. Nothing new to trust but the org's own registry." },
   ];
