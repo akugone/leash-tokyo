@@ -23,7 +23,7 @@ cd dashboard && bun run dev
 script/demo.sh agent
 ```
 
-`setup` funds the three demo keys, registers `leashdemo.eth` through the ENS commit/reveal registrar (paid in the testnet MockUSDC), deploys the org registry and resolver through ENS `VerifiableFactory`, deploys `LeashHook` at a mined CREATE2 address, creates the `lUSD/lETH` pool with the hook, seeds liquidity, issues `trader-1.leashdemo.eth` with its policy and grants the risk-manager its two scoped roles. It ends by printing `deployments/anvil.json`.
+`setup` funds the three demo keys, registers `leashdemo.eth` through the ENS commit/reveal registrar (paid in the testnet MockUSDC), deploys the org registry and resolver through ENS `VerifiableFactory`, deploys `LeashHook` at a mined CREATE2 address, creates the `lUSD/lETH` pool with the hook, seeds liquidity, deploys the org `LeashVault` and funds it with 100k of each token (the agent holds none), issues `trader-1.leashdemo.eth` with its policy and grants the risk-manager its two scoped roles. It ends by printing `deployments/anvil.json`.
 
 `agent` opens Claude Code with `agent/mcp.json` (the Leash MCP server, `agent/src/mcp.ts`) and the persona in `agent/prompt.md`. Claude has exactly two tools, `leash_policy` and `leash_swap`, both signed with `AGENT_PK`. Every tool call is mirrored to the dashboard's activity feed.
 
@@ -31,7 +31,7 @@ Keys: `.env` holds three fresh keys (`cast wallet new`). Never use anvil's defau
 
 ## Act 1: identity (30 s)
 
-Dashboard: `trader-1.leashdemo.eth`, status LIVE, expiry countdown (7 days), agent address, cap 250 lUSD, allowed tokens, hook and registry addresses. Two role cards on the right: risk-manager and owner.
+Dashboard: `trader-1.leashdemo.eth`, status LIVE, expiry countdown (7 days), agent address, cap 250 lUSD, allowed tokens, hook, org vault with its balances, and registry addresses. Two role cards on the right: risk-manager and owner.
 
 Agent terminal, ask: `what is your mandate?` Claude calls `leash_policy` and answers with the cap, spent, remaining, tokens and expiry.
 
@@ -47,7 +47,7 @@ Observed (Claude's answer):
 Sold 25 lUSD for lETH. Tx 0xd669…2178, block 11752589. Spent today: 25 / 250 lUSD cap.
 ```
 
-Dashboard activity feed: `signed SwapIntent: 25 lUSD exact in, 0->1, nonce 0`, `sent 0xd669…`, `OK block 11752589, spent today 25 lUSD of 250 lUSD`. The leash bar moves to 10 percent, the swap appears in the table.
+Dashboard activity feed: `signed SwapIntent: 25 lUSD exact in, 0->1, nonce 0`, `sent 0xd669…`, `OK block 11752589, spent today 25 lUSD of 250 lUSD`. The leash bar moves to 10 percent, the swap appears in the table, and the org vault card shows 25 lUSD less: the vault paid, the agent itself holds no tokens.
 
 ## Act 3: the agent oversteps (20 s)
 

@@ -26,6 +26,8 @@ Leash turns an ENS name into the agent's credential, and a Uniswap v4 hook into 
 4. **Enhanced Access Control** lets a `risk-manager` role hold `ROLE_SET_TEXT` scoped to just the `leash.dailyNotional` and `leash.tokens` keys, never the name itself, nor the owner-only `leash.maxSlippageBps`. Only the owner can revoke that role.
 5. The agent signs an EIP-712 `SwapIntent` (name, pool, direction, amount, nonce, deadline). `hookData` carries the label, the intent and the signature. A **Uniswap v4 hook** recovers the signer and compares it to the name's `addr` record: `beforeSwap` checks identity and the token allowlist, `afterSwap` counts the real quote token delta against the daily cap. No trusted router, any Uniswap v4 router works.
 
+6. The agent holds no tokens. The org's **vault** does: it only trades on pools gated by the Leash hook, only for the agent that signed the intent, and only the owner can withdraw. A leaked agent key can at worst trade inside the mandate.
+
 Revoking the subname is an instant kill switch. No key rotation, no redeploy, one transaction.
 
 ## Flow
@@ -38,6 +40,7 @@ sequenceDiagram
     participant Reg as Reg (org Permissioned Registry)
     participant Res as Res (Permissioned Resolver)
     participant Agent as Agent
+    participant Vault as Vault (org LeashVault)
     participant PM as PM (Uniswap v4 PoolManager)
     participant Hook as Hook (Leash Hook)
 
@@ -48,7 +51,9 @@ sequenceDiagram
 
     Note over Agent,Hook: Swap path
     Agent->>Agent: sign SwapIntent (name, pool, direction, amount, nonce, deadline)
-    Agent->>PM: swap(key, params, hookData = label + intent + signature)
+    Agent->>Vault: swap(key, params, hookData = label + intent + signature)
+    Vault->>Vault: pool uses the Leash hook, caller signed the intent
+    Vault->>PM: swap through PoolSwapTest, paid from the vault
     PM->>Hook: beforeSwap(sender, key, params, hookData)
     Hook->>Reg: getExpiry / getResolver
     Hook->>Res: resolve(addr, leash.*)
@@ -74,7 +79,8 @@ sequenceDiagram
 
     opt Cut the leash
         Ops->>Reg: unregister(trader-1)
-        Agent->>PM: next swap
+        Agent->>Vault: next swap
+        Vault->>PM: swap
         PM->>Hook: beforeSwap
         Hook-->>PM: revert LeashRevoked
     end
@@ -95,7 +101,7 @@ forge build && forge test
 ```bash
 script/demo.sh anvil            # 1. anvil fork of Sepolia (real ENSv2 and Uniswap v4 contracts)
 script/demo.sh setup            # 2. one shot, about a minute: registers leashdemo.eth, deploys the org registry,
-                                #    resolver, hook and pool, issues trader-1.leashdemo.eth with its policy
+                                #    resolver, hook, pool and org vault, issues trader-1.leashdemo.eth with its policy
 cd dashboard && bun run dev    # 3. http://localhost:5173/?label=trader-1 (setup already synced the record)
 script/demo.sh agent            # 4. Claude Code as trader-1, with only the leash_policy and leash_swap tools
 ```
@@ -128,6 +134,8 @@ Strip ENS out and the design collapses into a bespoke allowlist contract. That i
 * It trusts the `addr` record of the name as the agent's identity.
 * It trusts EIP-712 signatures over a `SwapIntent`, with a nonce per name.
 * It trusts the daily cap as measured in quote token units, from the real settlement delta in `afterSwap`.
+
+The vault trusts the hook it was deployed with, and the router it swaps through. Its owner is the only one who can move funds out.
 
 One resolver per org means a risk-manager's cap change applies to every agent name that resolver serves, not just one.
 
