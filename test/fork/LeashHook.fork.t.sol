@@ -179,7 +179,7 @@ contract LeashHookForkTest is ForkEnsFixture {
         address[] memory onlyToken0 = new address[](1);
         onlyToken0[0] = address(token0);
         vm.prank(riskManager);
-        orgResolver.setText(agentDnsName, LeashOrgLib.KEY_TOKENS, LeashOrgLib.tokenListString(onlyToken0));
+        agentResolver.setText(agentDnsName, LeashOrgLib.KEY_TOKENS, LeashOrgLib.tokenListString(onlyToken0));
 
         SwapIntent memory intent = _intent(agentNode, -int256(10e18), 0);
         bytes memory hookData = _signedHookData(agentLabel, intent, agentPk);
@@ -234,7 +234,7 @@ contract LeashHookForkTest is ForkEnsFixture {
 
         uint256 newCap = 150e18;
         vm.prank(riskManager);
-        orgResolver.setText(agentDnsName, LeashOrgLib.KEY_DAILY_NOTIONAL, LeashOrgLib.capString(newCap));
+        agentResolver.setText(agentDnsName, LeashOrgLib.KEY_DAILY_NOTIONAL, LeashOrgLib.capString(newCap));
         assertEq(hook.remainingToday(agentLabel), newCap - 100e18, "remaining under new cap");
 
         SwapIntent memory intent = _intent(agentNode, -int256(100e18), 1);

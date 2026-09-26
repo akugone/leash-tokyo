@@ -23,9 +23,8 @@ library LeashOrgLib {
     string internal constant KEY_TOKENS = "leash.tokens";
     string internal constant KEY_MAX_SLIPPAGE_BPS = "leash.maxSlippageBps";
 
-    /// @dev `VerifiableFactory` salts. The factory mixes in `msg.sender`, so they are per owner.
+    /// @dev `VerifiableFactory` salt of the org registry. The factory mixes in `msg.sender`, so it is per owner.
     uint256 internal constant REGISTRY_SALT = uint256(keccak256("leash.registry.v1"));
-    uint256 internal constant RESOLVER_SALT = uint256(keccak256("leash.resolver.v1"));
 
     // ============ Parent registration ============
 
@@ -57,12 +56,29 @@ library LeashOrgLib {
         return abi.encodeCall(IEACGrantInitializable.initialize, (grants));
     }
 
-    /// @notice `PermissionedResolver.initialize` calldata granting `owner` the org root roles, no setter calls.
-    function resolverInitData(address owner) internal pure returns (bytes memory) {
+    // ============ Agent resolver ============
+
+    /// @notice `VerifiableFactory` salt of an agent's own resolver. The expiry makes a re-issued name get a fresh
+    ///         resolver (same owner, same label, new mandate), since the factory reverts on a reused salt.
+    function agentResolverSalt(string memory label, uint64 expiry) internal pure returns (uint256) {
+        return uint256(keccak256(abi.encode("leash.agent-resolver.v1", label, expiry)));
+    }
+
+    /// @notice Salt of a resolver that replaces a live agent's current one (`MigrateAgentResolver`). Keyed on the
+    ///         migration time: the name keeps its expiry, so the issuance salt is already taken.
+    function migratedResolverSalt(string memory label, uint256 migratedAt) internal pure returns (uint256) {
+        return uint256(keccak256(abi.encode("leash.agent-resolver.migrated.v1", label, migratedAt)));
+    }
+
+    /// @notice `PermissionedResolver.initialize` calldata for an agent's own resolver: `owner` gets the org root
+    ///         roles, and `records` (setter calldata, e.g. `policyCalls`) are written in the same transaction.
+    /// @dev `initialize` runs `records` without permission checks, but it cannot grant scoped roles: the resolver
+    ///      sees the factory as the caller and `grantSetterRoles` reverts `EACCannotGrantRoles`. The risk manager
+    ///      is granted afterwards by the owner, see `riskManagerGrantCalls`.
+    function agentResolverInitData(address owner, bytes[] memory records) internal pure returns (bytes memory) {
         Grant[] memory grants = new Grant[](1);
         grants[0] = Grant({account: owner, roleBitmap: ResolverRoles.ORG_OWNER_ROOT_ROLES});
-        bytes[] memory calls = new bytes[](0);
-        return abi.encodeCall(IPermissionedResolver.initialize, (grants, calls));
+        return abi.encodeCall(IPermissionedResolver.initialize, (grants, records));
     }
 
     // ============ Agent subname ============
@@ -136,6 +152,16 @@ library LeashOrgLib {
         setters = new bytes[](2);
         setters[0] = textSetter(KEY_DAILY_NOTIONAL);
         setters[1] = textSetter(KEY_TOKENS);
+    }
+
+    /// @notice Calls for `resolver.multicall` granting `riskManager` the two keys of `riskManagerSetters`, on that
+    ///         one agent's resolver: one owner transaction, and no power over any other agent.
+    function riskManagerGrantCalls(address riskManager) internal pure returns (bytes[] memory calls) {
+        bytes[] memory setters = riskManagerSetters();
+        calls = new bytes[](setters.length);
+        for (uint256 i = 0; i < setters.length; i++) {
+            calls[i] = abi.encodeCall(IPermissionedResolver.grantSetterRoles, (setters[i], riskManager));
+        }
     }
 
     /// @notice Text keys the risk manager may write, same order as `riskManagerSetters`.

@@ -17,8 +17,9 @@ contract RiskManagerTriesRevoke is DeploymentsScript {
     function run() external {
         address riskManager = vm.addr(vm.envUint("RISK_MANAGER_PK"));
         IPermissionedRegistry registry = IPermissionedRegistry(_readAddress("orgRegistry"));
-        IPermissionedResolver resolver = IPermissionedResolver(_readAddress("orgResolver"));
-        string memory label = _readString("agentLabel");
+        string memory label = vm.envOr("LABEL", _readString("agentLabel"));
+        // The agent's own resolver, as the org registry points to it.
+        IPermissionedResolver resolver = IPermissionedResolver(registry.getResolver(label));
         bytes memory name = EnsNameLib.dnsEncode(label, EnsNameLib.dnsEncodeName(_readString("parentName")));
 
         // 1. Revoke the agent: registry says no, the risk-manager holds no registry role at all.

@@ -12,14 +12,15 @@ import {IPermissionedResolver} from "../../src/interfaces/ens/IPermissionedResol
 import {IVerifiableFactory} from "../../src/interfaces/ens/IVerifiableFactory.sol";
 import {EnsNameLib} from "../../src/libraries/EnsNameLib.sol";
 
-/// @notice Replays the whole ENS side of the demo on a Sepolia fork: parent name, org registry, org resolver,
-///         agent subname with policy, scoped risk manager. Other fork suites inherit it.
+/// @notice Replays the whole ENS side of the demo on a Sepolia fork: parent name, org registry, agent subname with
+///         its own resolver holding its policy, risk manager scoped to that resolver. Other fork suites inherit it.
 /// @dev Same `LeashOrgLib` encodings as the scripts; only the signer plumbing differs (pranks instead of
-///      broadcasts). The fork is pinned so forge caches the RPC state.
+///      broadcasts). The fork is pinned so forge caches the RPC state; `FORK_BLOCK` overrides the pin, for an RPC
+///      that is not an archive node (a block a few minutes old).
 abstract contract ForkEnsFixture is Test {
     // ============ Constants ============
 
-    uint256 internal constant FORK_BLOCK = 11_752_543;
+    uint256 internal constant DEFAULT_FORK_BLOCK = 11_752_543;
 
     /// @dev Fixed keys, distinct from anvil's, so the derived owner never collides with a real Sepolia user
     ///      of the `VerifiableFactory` salts.
@@ -61,7 +62,8 @@ abstract contract ForkEnsFixture is Test {
     // ============ Org contracts ============
 
     IPermissionedRegistry internal orgRegistry;
-    IPermissionedResolver internal orgResolver;
+    /// @dev Own resolver of `agentLabel`. Every agent issued by `_issueAgent` gets its own.
+    IPermissionedResolver internal agentResolver;
 
     // ============ Policy used by setUpEns ============
 
@@ -73,7 +75,6 @@ abstract contract ForkEnsFixture is Test {
 
     uint256 internal gasRegisterParent;
     uint256 internal gasDeployOrgRegistry;
-    uint256 internal gasDeployOrgResolver;
     uint256 internal gasIssueAgent;
     uint256 internal gasGrantRiskManager;
 
@@ -81,7 +82,7 @@ abstract contract ForkEnsFixture is Test {
 
     /// @notice Select the pinned Sepolia fork and derive the actors.
     function _forkSepolia() internal {
-        vm.createSelectFork(vm.envString("SEPOLIA_RPC_URL"), FORK_BLOCK);
+        vm.createSelectFork(vm.envString("SEPOLIA_RPC_URL"), vm.envOr("FORK_BLOCK", DEFAULT_FORK_BLOCK));
 
         owner = vm.addr(ownerPk);
         riskManager = vm.addr(riskManagerPk);
@@ -123,15 +124,11 @@ abstract contract ForkEnsFixture is Test {
         gasDeployOrgRegistry = g - gasleft();
 
         g = gasleft();
-        _deployOrgResolver();
-        gasDeployOrgResolver = g - gasleft();
-
-        g = gasleft();
         _issueAgent(agentLabel, DEFAULT_TTL, quote, cap, tokens);
         gasIssueAgent = g - gasleft();
 
         g = gasleft();
-        _grantRiskManager();
+        _grantRiskManager(agentResolver);
         gasGrantRiskManager = g - gasleft();
     }
 
@@ -178,54 +175,43 @@ abstract contract ForkEnsFixture is Test {
         vm.label(proxy, "orgRegistry");
     }
 
-    /// @notice Deploy the org `PermissionedResolver` proxy owned by `owner`.
-    function _deployOrgResolver() internal {
-        vm.prank(owner);
-        address proxy = factory.deployProxy(
-            SepoliaAddresses.ENS_PERMISSIONED_RESOLVER_IMPL,
-            LeashOrgLib.RESOLVER_SALT,
-            LeashOrgLib.resolverInitData(owner)
-        );
-
-        orgResolver = IPermissionedResolver(proxy);
-        vm.label(proxy, "orgResolver");
-    }
-
-    /// @notice Register `label` under the org registry (owned by `owner`, resolved by `orgResolver`) and
-    ///         write the agent's policy. Updates `agentDnsName` / `agentNode` when `label == agentLabel`.
+    /// @notice Deploy `label`'s own resolver with its policy written in `initialize`, then register `label` under
+    ///         the org registry (owned by `owner`) pointing to it. Updates `agentResolver`, `agentDnsName` and
+    ///         `agentNode` when `label == agentLabel`.
     function _issueAgent(string memory label, uint64 ttl, address quote, uint256 cap, address[] memory tokens)
         internal
         returns (bytes memory dnsName)
     {
         dnsName = _dnsName(label);
+        uint64 expiry = uint64(block.timestamp) + ttl;
+
+        vm.startPrank(owner);
+        address resolver = factory.deployProxy(
+            SepoliaAddresses.ENS_PERMISSIONED_RESOLVER_IMPL,
+            LeashOrgLib.agentResolverSalt(label, expiry),
+            LeashOrgLib.agentResolverInitData(owner, LeashOrgLib.policyCalls(dnsName, agent, quote, cap, tokens))
+        );
+        orgRegistry.register(label, owner, address(0), resolver, LeashOrgLib.agentTokenRoles(), expiry);
+        vm.stopPrank();
+        vm.label(resolver, string.concat("resolver:", label));
+
         if (keccak256(bytes(label)) == keccak256(bytes(agentLabel))) {
+            agentResolver = IPermissionedResolver(resolver);
             agentDnsName = dnsName;
             agentNode = EnsNameLib.namehash(string.concat(label, ".", parentName));
         }
-
-        vm.prank(owner);
-        orgRegistry.register(
-            label, owner, address(0), address(orgResolver), LeashOrgLib.agentTokenRoles(), uint64(block.timestamp) + ttl
-        );
-        _setPolicy(dnsName, agent, quote, cap, tokens);
     }
 
-    /// @notice Write addr + the three `leash.*` text records in one `multicall`, as `owner`.
-    function _setPolicy(bytes memory dnsName, address agentAddr, address quote, uint256 cap, address[] memory tokens)
-        internal
-    {
-        vm.prank(owner);
-        orgResolver.multicall(LeashOrgLib.policyCalls(dnsName, agentAddr, quote, cap, tokens));
+    /// @notice The resolver the org registry currently points `label` to, zero once cut or expired.
+    function _resolverOf(string memory label) internal view returns (IPermissionedResolver) {
+        return IPermissionedResolver(orgRegistry.getResolver(label));
     }
 
-    /// @notice Grant the risk manager `ROLE_SET_TEXT` on the two mutable policy keys.
-    function _grantRiskManager() internal {
-        bytes[] memory setters = LeashOrgLib.riskManagerSetters();
-        vm.startPrank(owner);
-        for (uint256 i = 0; i < setters.length; i++) {
-            orgResolver.grantSetterRoles(setters[i], riskManager);
-        }
-        vm.stopPrank();
+    /// @notice Grant the risk manager `ROLE_SET_TEXT` on the two mutable policy keys of one agent's resolver,
+    ///         in one owner `multicall`.
+    function _grantRiskManager(IPermissionedResolver resolver) internal {
+        vm.prank(owner);
+        resolver.multicall(LeashOrgLib.riskManagerGrantCalls(riskManager));
     }
 
     /// @notice DNS-encoded `<label>.<parentName>`.
@@ -237,13 +223,9 @@ abstract contract ForkEnsFixture is Test {
     function _logSetupGas() internal view {
         console2.log("gas RegisterParent (mint+approve+commit+register)", gasRegisterParent);
         console2.log("gas DeployOrgRegistry (deployProxy+setSubregistry)", gasDeployOrgRegistry);
-        console2.log("gas DeployOrgResolver (deployProxy)", gasDeployOrgResolver);
-        console2.log("gas IssueAgent (register+multicall)", gasIssueAgent);
-        console2.log("gas GrantRiskManager (2x grantSetterRoles)", gasGrantRiskManager);
-        console2.log(
-            "gas total",
-            gasRegisterParent + gasDeployOrgRegistry + gasDeployOrgResolver + gasIssueAgent + gasGrantRiskManager
-        );
+        console2.log("gas IssueAgent (deployProxy with records + register)", gasIssueAgent);
+        console2.log("gas GrantRiskManager (multicall of 2 grantSetterRoles)", gasGrantRiskManager);
+        console2.log("gas total", gasRegisterParent + gasDeployOrgRegistry + gasIssueAgent + gasGrantRiskManager);
     }
 
     /// @dev `leash<6 digits of owner>`, suffixed with a counter while the forked chain already has it.

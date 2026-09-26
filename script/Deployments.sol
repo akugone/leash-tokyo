@@ -6,7 +6,9 @@ import {Script} from "forge-std/Script.sol";
 /// @notice Shared JSON deployment record for every Leash script.
 /// @dev File path comes from `LEASH_DEPLOYMENTS_FILE` (default `deployments/sepolia.json`).
 ///      Keys (all strings in JSON): chainId, parentLabel, parentName, parentNode, orgOwner, riskManager, agent,
-///      agentLabel, orgRegistry, orgResolver, hook, token0, token1, quote, fee, tickSpacing, poolId, vault.
+///      agentLabel, orgRegistry, agentResolver (own resolver of agentLabel), hook, token0, token1, quote, fee,
+///      tickSpacing, poolId, vault. Live Sepolia only: orgResolverPrevious (the shared resolver agents used
+///      before each got its own), vaultPrevious.
 ///      Signer keys come from `OWNER_PK`, `RISK_MANAGER_PK`, `AGENT_PK`.
 abstract contract DeploymentsScript is Script {
     string internal constant DEFAULT_FILE = "deployments/sepolia.json";
