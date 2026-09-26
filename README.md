@@ -8,7 +8,7 @@ A Uniswap v4 hook that gates every swap on the trading agent's ENSv2 subname and
 
 **Dashboard: [leash-omega.vercel.app/app](https://leash-omega.vercel.app/app)**. Every value on it is read from Sepolia, nothing is hard coded (the RPC is in the footer). The owner and risk-manager cards sign with a connected wallet.
 
-The org is **`leash.eth`** on the ENSv2 beta, and its agent is **`trader-1.leash.eth`**: a daily cap of 250 lUSD, lUSD and lETH allowed, max slippage of 1% (100 bps), a mandate that ends on 2026-10-26.
+The org is **`leash.eth`** on the ENSv2 beta, and its agent is **`trader-1.leash.eth`**: a daily cap in lUSD, lUSD and lETH allowed, a max slippage per swap, a mandate that ends on 2026-10-26. The risk manager and the owner change these records during the demo, so the dashboard shows the current values rather than this page.
 
 Contract addresses and how to check it yourself: [Deployed on Sepolia](#deployed-on-sepolia). The Uniswap v4 hook, line by line: [Where the Uniswap v4 integration lives](#where-the-uniswap-v4-integration-lives).
 
@@ -29,7 +29,7 @@ There is no onchain answer to a simple question: *is this address still allowed 
 Leash turns an ENS name into the agent's credential, and a Uniswap v4 hook into the enforcement point.
 
 1. The organisation owns `leash.eth` and deploys its own **Permissioned Registry**.
-2. Each agent is issued a revocable subname with an expiry: `trader-1.leash.eth`.
+2. Each agent is issued a revocable subname with an expiry: `trader-1.leash.eth`. Every agent is its own name in the org's namespace, with its own identity (the `addr` record), its own limits (text records) and its own mandate end (the expiry).
 3. The agent's risk policy lives in its **Permissioned Resolver**: the agent address is the name's native `addr` record, and the daily notional cap, allowed tokens and maximum price impact per swap are text records, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`.
 4. **Enhanced Access Control** lets a `risk-manager` role hold `ROLE_SET_TEXT` scoped to just the `leash.dailyNotional` and `leash.tokens` keys, never the name itself, nor the owner-only `leash.maxSlippageBps`. Only the owner can revoke that role.
 5. The agent signs an EIP-712 `SwapIntent` (name, pool, direction, amount, nonce, deadline). `hookData` carries the label, the intent and the signature. A **Uniswap v4 hook** recovers the signer and compares it to the name's `addr` record: `beforeSwap` checks identity and the token allowlist, `afterSwap` counts the real quote token delta against the daily cap. No trusted router, any Uniswap v4 router works.
@@ -137,6 +137,7 @@ Leash is two halves that need each other: ENSv2 says who may trade and within wh
 |---|---|
 | Permissioned Registry | The org's own namespace, issuing and revoking agent identities |
 | Subname expiry | Time-boxed mandates that lapse on their own |
+| Name token held by the org | The agent only appears in the `addr` record: it trades under its name, but can neither transfer it, renew it nor edit its own policy |
 | Permissioned Resolver | Where the risk policy actually lives, readable onchain by the hook |
 | Enhanced Access Control | Per record key delegation: the risk desk edits `leash.dailyNotional`, never the name |
 
@@ -216,7 +217,18 @@ Pool: lUSD/lETH, fee 3000, tick spacing 60, id `0x74e548ef341b71b902f9f0b6ff76c3
 **Check it yourself**
 
 1. On the hook's [Read Contract](https://sepolia.etherscan.io/address/0x8c1f16B42C75190316636a956A4C85F8D1c440c0#readContract) tab, call `policy("trader-1")`. It returns the agent address, quote token, cap, allowed tokens and expiry, read live from the ENS resolver. `remainingToday("trader-1")` and `maxSlippageBps("trader-1")` work the same way.
-2. An agent swap, [`0xe289a614…c55857`](https://sepolia.etherscan.io/tx/0xe289a614c9614923730a1abf8ca3794149a01bf9a0f96926bbda652ac0c55857): the agent calls the vault, the vault pays 5 lUSD, and the hook emits `LeashSwap` with the spend counted against the cap.
-3. A refused order, recorded on chain, [`0x42dd5f63…f00bc2`](https://sepolia.etherscan.io/tx/0x42dd5f635dc8c680249e776cadb65177396c6754e9dabd286e2193696df00bc2): the agent asked for 500 lUSD over a 100 lUSD cap through the vault's `trySwap`. The transaction succeeds, nothing moves, and the vault emits `SwapRefused` carrying the hook's `DailyCapExceeded` error. The dashboard's activity feed decodes it.
-4. The agent's address holds no lUSD and no lETH: the tokens sit in the vault, which only trades on pools gated by the hook, and only the owner can withdraw from it.
-5. On the dashboard, **Try to revoke** simulates the risk manager calling `unregister`, `setAddress` and the owner-only records. Each call reverts with `EACUnauthorizedAccountRoles`, the ENSv2 Enhanced Access Control error.
+2. Resolve the name like any ENS client, through the ENSv2 `UniversalResolverV2` on Sepolia, without going through Leash (`0x0874…6800` is `trader-1.leash.eth`, DNS encoded):
+
+   ```bash
+   cast call 0x5d25c1d6acbb71b7a28aa7899618a3412a8303e3 "resolve(bytes,bytes)(bytes,address)" 0x087472616465722d31056c656173680365746800 $(cast calldata "addr(bytes32)" $(cast namehash trader-1.leash.eth)) --rpc-url https://ethereum-sepolia-rpc.publicnode.com
+   ```
+
+   It returns the agent's address and the org resolver `0x5112…668F`. The policy reads the same way, here the daily cap:
+
+   ```bash
+   cast call 0x5d25c1d6acbb71b7a28aa7899618a3412a8303e3 "resolve(bytes,bytes)(bytes,address)" 0x087472616465722d31056c656173680365746800 $(cast calldata "text(bytes32,string)" $(cast namehash trader-1.leash.eth) leash.dailyNotional) --rpc-url https://ethereum-sepolia-rpc.publicnode.com | head -1 | xargs cast abi-decode "f()(string)"
+   ```
+3. An agent swap, [`0xe289a614…c55857`](https://sepolia.etherscan.io/tx/0xe289a614c9614923730a1abf8ca3794149a01bf9a0f96926bbda652ac0c55857): the agent calls the vault, the vault pays 5 lUSD, and the hook emits `LeashSwap` with the spend counted against the cap.
+4. A refused order, recorded on chain, [`0x42dd5f63…f00bc2`](https://sepolia.etherscan.io/tx/0x42dd5f635dc8c680249e776cadb65177396c6754e9dabd286e2193696df00bc2): the agent asked for 500 lUSD over a 100 lUSD cap through the vault's `trySwap`. The transaction succeeds, nothing moves, and the vault emits `SwapRefused` carrying the hook's `DailyCapExceeded` error. The dashboard's activity feed decodes it.
+5. The agent's address holds no lUSD and no lETH: the tokens sit in the vault, which only trades on pools gated by the hook, and only the owner can withdraw from it.
+6. On the dashboard, **Try to revoke** simulates the risk manager calling `unregister`, `setAddress` and the owner-only records. Each call reverts with `EACUnauthorizedAccountRoles`, the ENSv2 Enhanced Access Control error.
