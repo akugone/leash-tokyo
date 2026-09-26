@@ -74,7 +74,7 @@ function Nav() {
           <Logo className="lp-logo" /> Leash
         </a>
         <nav className="lp-links" aria-label="Sections">
-          <a href="#what">What</a>
+          <a href="#what">Why</a>
           <a href="#solves">What it solves</a>
           <a href="#use-cases">Use cases</a>
           <a href="#how">How it works</a>
