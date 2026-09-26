@@ -2,15 +2,15 @@
 
 **ENS-native permissions for autonomous traders. Name your agent, bound it, revoke it.**
 
-A Uniswap v4 hook that gates every swap on the trading agent's ENSv2 subname and on the risk policy stored in that name's resolver.
+A Uniswap v4 hook that gates every swap on the trading agent's ENSv2 subname and on the risk policy stored in that agent's own Permissioned Resolver.
 
 ## Live on Sepolia
 
 **Dashboard: [leash-omega.vercel.app/app](https://leash-omega.vercel.app/app)**. Every value on it is read from Sepolia, nothing is hard coded (the RPC is in the footer). The owner and risk-manager cards sign with a connected wallet.
 
-The org is **`leash.eth`** on the ENSv2 beta, and its agent is **`trader-1.leash.eth`**: a daily cap in lUSD, lUSD and lETH allowed, a max slippage per swap, a mandate that ends on 2026-10-26. The risk manager and the owner change these records during the demo, so the dashboard shows the current values rather than this page.
+The org is **`leash.eth`** on the ENSv2 beta, and its agent is **`trader-1.leash.eth`**, resolved by its own Permissioned Resolver: a daily cap in lUSD, lUSD and lETH allowed, a max slippage per swap, a mandate that ends on 2026-10-26. The risk manager and the owner change these records during the demo, so the dashboard shows the current values rather than this page.
 
-Contract addresses and how to check it yourself: [Deployed on Sepolia](#deployed-on-sepolia). The Uniswap v4 hook, line by line: [Where the Uniswap v4 integration lives](#where-the-uniswap-v4-integration-lives).
+Contract addresses and how to check it yourself: [Deployed on Sepolia](#deployed-on-sepolia). The Uniswap v4 hook, line by line: [Where the Uniswap v4 integration lives](#where-the-uniswap-v4-integration-lives). Every agent owns its ENSv2 resolver: [One Permissioned Resolver per agent](#one-permissioned-resolver-per-agent).
 
 ---
 
@@ -30,8 +30,8 @@ Leash turns an ENS name into the agent's credential, and a Uniswap v4 hook into 
 
 1. The organisation owns `leash.eth` and deploys its own **Permissioned Registry**.
 2. Each agent is issued a revocable subname with an expiry: `trader-1.leash.eth`. Every agent is its own name in the org's namespace, with its own identity (the `addr` record), its own limits (text records) and its own mandate end (the expiry).
-3. The agent's risk policy lives in its **Permissioned Resolver**: the agent address is the name's native `addr` record, and the daily notional cap, allowed tokens and maximum price impact per swap are text records, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`.
-4. **Enhanced Access Control** lets a `risk-manager` role hold `ROLE_SET_TEXT` scoped to just the `leash.dailyNotional` and `leash.tokens` keys, never the name itself, nor the owner-only `leash.maxSlippageBps`. Only the owner can revoke that role.
+3. **Every agent gets its own Permissioned Resolver**, deployed by the org with the agent's policy written in the same transaction, and the subname points to it. The agent owns its data: its resolver holds its records and nobody else's. The agent address is the name's native `addr` record, and the daily notional cap, allowed tokens and maximum price impact per swap are text records, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`.
+4. **Enhanced Access Control** lets a `risk-manager` role hold `ROLE_SET_TEXT` scoped to just the `leash.dailyNotional` and `leash.tokens` keys, granted on one agent's resolver: never the name itself, nor the owner-only `leash.maxSlippageBps`, nor any other agent. An agent can be issued with no risk manager at all. Only the owner can revoke that role, agent by agent.
 5. The agent signs an EIP-712 `SwapIntent` (name, pool, direction, amount, nonce, deadline). `hookData` carries the label, the intent and the signature. A **Uniswap v4 hook** recovers the signer and compares it to the name's `addr` record: `beforeSwap` checks identity and the token allowlist, `afterSwap` counts the real quote token delta against the daily cap. No trusted router, any Uniswap v4 router works.
 
 6. The agent holds no tokens. The org's **vault** does: it only trades on pools gated by the Leash hook, only for the agent that signed the intent, and only the owner can withdraw. A leaked agent key can at worst trade inside the mandate.
@@ -46,16 +46,16 @@ sequenceDiagram
     participant Ops as Ops (org owner)
     participant Risk as Risk (risk-manager)
     participant Reg as Reg (org Permissioned Registry)
-    participant Res as Res (Permissioned Resolver)
+    participant Res as Res (trader-1's own Permissioned Resolver)
     participant Agent as Agent
     participant Vault as Vault (org LeashVault)
     participant PM as PM (Uniswap v4 PoolManager)
     participant Hook as Hook (Leash Hook)
 
     Note over Ops,Res: Setup
-    Ops->>Reg: register subname trader-1 (expiry)
-    Ops->>Res: write records (addr, leash.quote, leash.dailyNotional, leash.tokens, leash.maxSlippageBps)
-    Ops->>Res: grantSetterRoles(scoped ROLE_SET_TEXT, Risk)
+    Ops->>Res: deploy through VerifiableFactory, records written in initialize (addr, leash.quote, leash.dailyNotional, leash.tokens, leash.maxSlippageBps)
+    Ops->>Reg: register subname trader-1 (resolver = Res, expiry)
+    Ops->>Res: grantSetterRoles(scoped ROLE_SET_TEXT, Risk), on this agent's resolver only
 
     Note over Agent,Hook: Swap path
     Agent->>Agent: sign SwapIntent (name, pool, direction, amount, nonce, deadline)
@@ -121,7 +121,7 @@ Then, side by side:
    Optional: dashboard, owner card, set max slippage to 5 bps. `buy 100 lUSD of lETH` is partially filled at the price limit, asking for 0.5% slippage reverts `SlippageTooLoose`.
 3. Dashboard, risk-manager card: set the cap to 10 and click **tighten the leash**. Click **try to revoke**: every attempt reverts with `EACUnauthorizedAccountRoles`.
 4. Dashboard, owner card: **cut the leash**. Status flips to REVOKED. Ask the agent to trade again: `LeashRevoked`.
-5. Dashboard, **+ New agent** tab: issue `trader-2` with its own cap, slippage and expiry. Two owner transactions, no new contract. Every name the org issued gets its own tab, read from the registry's `LabelRegistered` events; a cut one stays greyed at the end, with **Re-issue**. Agent terminal: `buy 20 lUSD of lETH as trader-2`, and the hook enforces the new mandate. All agents trade from the one org vault shown above the tabs (**Fund vault** mints more test tokens into it).
+5. Dashboard, **+ New agent** tab: issue `trader-2` with its own resolver, cap, slippage and expiry. Owner transactions: its own Permissioned Resolver with the policy written in `initialize`, the name pointing to it, then (optional checkbox) the risk manager's role on that resolver. Issue it without the risk manager and **tighten the leash** on `trader-2` reverts `EACUnauthorizedAccountRoles`, while it still works on `trader-1`. Every name the org issued gets its own tab, read from the registry's `LabelRegistered` events; a cut one stays greyed at the end, with **Re-issue**. Agent terminal: `buy 20 lUSD of lETH as trader-2`, and the hook enforces the new mandate. All agents trade from the one org vault shown above the tabs (**Fund vault** mints more test tokens into it).
 
 The same acts run against the live Sepolia deployment: prefix any command with `LEASH_NETWORK=sepolia` (for instance `LEASH_NETWORK=sepolia script/demo.sh agent`), and start the dashboard with `LEASH_NETWORK=sepolia script/demo.sh dashboard` to keep the owner and risk-manager controls. `LEASH_NETWORK=sepolia script/demo.sh deploy` is the one shot live deployment. Add `LEASH_RECORD_REFUSALS=1` in front of the agent command to send refused orders anyway through the vault's `trySwap`: each refusal is recorded on chain as a `SwapRefused` event with the hook's reason, and shows in the dashboard's on-chain activity (the agent pays about 0.0004 ETH of Sepolia gas per refusal).
 
@@ -138,8 +138,8 @@ Leash is two halves that need each other: ENSv2 says who may trade and within wh
 | Permissioned Registry | The org's own namespace, issuing and revoking agent identities |
 | Subname expiry | Time-boxed mandates that lapse on their own |
 | Name token held by the org | The agent only appears in the `addr` record: it trades under its name, but can neither transfer it, renew it nor edit its own policy |
-| Permissioned Resolver | Where the risk policy actually lives, readable onchain by the hook |
-| Enhanced Access Control | Per record key delegation: the risk desk edits `leash.dailyNotional`, never the name |
+| Permissioned Resolver, one per agent | Each agent owns its data: its policy lives in its own resolver, readable onchain by the hook and by any ENS client |
+| Enhanced Access Control | Per agent, per record key delegation: the risk desk edits `trader-1`'s `leash.dailyNotional`, never the name, never another agent |
 
 **Uniswap v4 enforces it**
 
@@ -151,6 +151,16 @@ Leash is two halves that need each other: ENSv2 says who may trade and within wh
 | `afterSwap` and `BalanceDelta` | The daily cap counts the real settled quote token amount, not a quoted or claimed one |
 
 Strip ENS out and the policy has nowhere to live: the design collapses into a bespoke allowlist contract. Strip Uniswap v4 out and nothing enforces the policy at the moment of the trade: you are back to a trusted router, or a bot promising to behave. Leash passes both tests.
+
+### One Permissioned Resolver per agent
+
+Every agent owns its data: the org deploys a dedicated ENSv2 Permissioned Resolver for each agent it issues, and the agent's subname points to it.
+
+* **Created with its policy.** `VerifiableFactory.deployProxy` creates the resolver and writes `addr` and the `leash.*` records in `initialize`, in one transaction; `register` then points the name to it. See [`script/ens/IssueAgent.s.sol`](script/ens/IssueAgent.s.sol) and the dashboard's **+ New agent** tab ([`dashboard/src/lib/actions.ts`](dashboard/src/lib/actions.ts), `issueCalls`).
+* **Delegation per agent.** The resolver scopes Enhanced Access Control roles per record key. One resolver per agent turns the risk manager's `ROLE_SET_TEXT` on `leash.dailyNotional` and `leash.tokens` into a right on that one agent ([`script/ens/GrantRiskManager.s.sol`](script/ens/GrantRiskManager.s.sol)). An agent can run with no risk manager, and revoking the role on one agent leaves the others alone.
+* **Nothing to change in the hook.** It already asks the org registry for each name's resolver on every swap (`getResolver(label)`), so every agent's own resolver is read the moment the name points to it.
+* **Migrated live.** `trader-1` and `trader-2` started on a resolver shared by the org. [`script/ens/MigrateAgentResolver.s.sol`](script/ens/MigrateAgentResolver.s.sol) copied each one's records into its own resolver and re-pointed the name with `setResolver`, keeping its token and expiry: for `trader-1`, [deploy](https://sepolia.etherscan.io/tx/0xd772cca1340f4faabdc98c8fec7e9947908eceba49b899244296306d3d94321e), [re-point](https://sepolia.etherscan.io/tx/0xc6502fb240156c9d04eb70c5e1fdef4baf361580e71f4f862c30464e9323d628), [risk manager grant](https://sepolia.etherscan.io/tx/0x381bdac709adf7e9d543e6e73d1194c5102c69e1b5cf7ce228d532551aaba14b).
+* **Tested on the real contracts.** [`test/fork/EnsSetup.t.sol`](test/fork/EnsSetup.t.sol) runs against the Sepolia ENSv2 deployment: each agent gets a distinct resolver holding only its records, a risk manager with no grant on an agent reverts `EACUnauthorizedAccountRoles`, a revoke on one agent keeps the grant on another, a name moves to a fresh resolver with its expiry kept, and the `UniversalResolver` resolves the agent through its own resolver.
 
 ### Where the Uniswap v4 integration lives
 
@@ -177,14 +187,14 @@ Developer feedback on Uniswap v4 and ENSv2: [FEEDBACK.md](FEEDBACK.md).
 ## Trust model
 
 * The hook trusts the org registry address and the parent name it was deployed with.
-* It trusts the resolver that registry points to, nothing else.
+* It trusts the resolver that registry points each name to (the agent's own), nothing else.
 * It trusts the `addr` record of the name as the agent's identity.
 * It trusts EIP-712 signatures over a `SwapIntent`, with a nonce per name.
 * It trusts the daily cap as measured in quote token units, from the real settlement delta in `afterSwap`.
 
 The vault trusts the hook it was deployed with, and the router it swaps through. Its owner is the only one who can move funds out.
 
-One resolver per org means a risk-manager's cap change applies to every agent name that resolver serves, not just one.
+Every agent has its own resolver, so a risk-manager's role covers the agents it was granted on and no other: an org can give each desk its own agents, or issue an agent with no risk manager at all.
 
 ## Vocabulary
 
@@ -202,7 +212,9 @@ One resolver per org means a risk-manager's cap change applies to every agent na
 | lUSD, the quote token (`token0`) | [`0x3EC79AB413c942159218358dfb6EB83Fa1F59C4E`](https://sepolia.etherscan.io/address/0x3EC79AB413c942159218358dfb6EB83Fa1F59C4E#code) | verified |
 | lETH (`token1`) | [`0x9E63305f38825e126BBD7A9582a53bd516431C02`](https://sepolia.etherscan.io/address/0x9E63305f38825e126BBD7A9582a53bd516431C02#code) | verified |
 | Org Permissioned Registry of `leash.eth` | [`0xe614c0f0D9Ce98Aaf986Fce5f5Ef46614DF64fE9`](https://sepolia.etherscan.io/address/0xe614c0f0D9Ce98Aaf986Fce5f5Ef46614DF64fE9) | ENS `VerifiableFactory` proxy |
-| Org Permissioned Resolver (the policy records) | [`0x5112C1F6bF910DC0B127BE2B109Dc484168c668F`](https://sepolia.etherscan.io/address/0x5112C1F6bF910DC0B127BE2B109Dc484168c668F) | ENS `VerifiableFactory` proxy |
+| Own Permissioned Resolver of `trader-1.leash.eth` (its policy records) | [`0x084976Ed9Ca1ac81057250F3A5aB4a40B2f98ee8`](https://sepolia.etherscan.io/address/0x084976Ed9Ca1ac81057250F3A5aB4a40B2f98ee8) | ENS `VerifiableFactory` proxy |
+| Own Permissioned Resolver of `trader-2.leash.eth` | [`0xA0CA8bC1a9903B536e492e1DBd5C1E1c56D10b4d`](https://sepolia.etherscan.io/address/0xA0CA8bC1a9903B536e492e1DBd5C1E1c56D10b4d) | ENS `VerifiableFactory` proxy |
+| Previous resolver, shared by the agents before each got its own | [`0x5112C1F6bF910DC0B127BE2B109Dc484168c668F`](https://sepolia.etherscan.io/address/0x5112C1F6bF910DC0B127BE2B109Dc484168c668F) | ENS `VerifiableFactory` proxy |
 | ENSv2 `.eth` registry (holds `leash.eth`) | [`0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E`](https://sepolia.etherscan.io/address/0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E) | ENS |
 | Uniswap v4 PoolManager | [`0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`](https://sepolia.etherscan.io/address/0xE03A1074c86CFeDd5C142C4F04F1a1536e203543) | Uniswap |
 
@@ -223,7 +235,7 @@ Pool: lUSD/lETH, fee 3000, tick spacing 60, id `0x74e548ef341b71b902f9f0b6ff76c3
    cast call 0x5d25c1d6acbb71b7a28aa7899618a3412a8303e3 "resolve(bytes,bytes)(bytes,address)" 0x087472616465722d31056c656173680365746800 $(cast calldata "addr(bytes32)" $(cast namehash trader-1.leash.eth)) --rpc-url https://ethereum-sepolia-rpc.publicnode.com
    ```
 
-   It returns the agent's address and the org resolver `0x5112…668F`. The policy reads the same way, here the daily cap:
+   It returns the agent's address and `trader-1`'s own resolver `0x0849…8ee8`. The policy reads the same way, here the daily cap:
 
    ```bash
    cast call 0x5d25c1d6acbb71b7a28aa7899618a3412a8303e3 "resolve(bytes,bytes)(bytes,address)" 0x087472616465722d31056c656173680365746800 $(cast calldata "text(bytes32,string)" $(cast namehash trader-1.leash.eth) leash.dailyNotional) --rpc-url https://ethereum-sepolia-rpc.publicnode.com | head -1 | xargs cast abi-decode "f()(string)"
@@ -232,3 +244,4 @@ Pool: lUSD/lETH, fee 3000, tick spacing 60, id `0x74e548ef341b71b902f9f0b6ff76c3
 4. A refused order, recorded on chain, [`0x42dd5f63…f00bc2`](https://sepolia.etherscan.io/tx/0x42dd5f635dc8c680249e776cadb65177396c6754e9dabd286e2193696df00bc2): the agent asked for 500 lUSD over a 100 lUSD cap through the vault's `trySwap`. The transaction succeeds, nothing moves, and the vault emits `SwapRefused` carrying the hook's `DailyCapExceeded` error. The dashboard's activity feed decodes it.
 5. The agent's address holds no lUSD and no lETH: the tokens sit in the vault, which only trades on pools gated by the hook, and only the owner can withdraw from it.
 6. On the dashboard, **Try to revoke** simulates the risk manager calling `unregister`, `setAddress` and the owner-only records. Each call reverts with `EACUnauthorizedAccountRoles`, the ENSv2 Enhanced Access Control error.
+7. On the dashboard, the **Onchain** facts of each agent show its **own resolver** and whether the risk manager holds a role on it. The **On chain** activity feed shows `trader-1.leash.eth moved to its own resolver 0x0849…8ee8`. On Etherscan, the resolver's [events](https://sepolia.etherscan.io/address/0x084976Ed9Ca1ac81057250F3A5aB4a40B2f98ee8#events) hold `trader-1`'s records only.

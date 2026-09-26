@@ -23,7 +23,7 @@ cd dashboard && bun run dev
 script/demo.sh agent
 ```
 
-`setup` funds the three demo keys, registers `leash.eth` through the ENS commit/reveal registrar (paid in the testnet MockUSDC), deploys the org registry and resolver through ENS `VerifiableFactory`, deploys `LeashHook` at a mined CREATE2 address, creates the `lUSD/lETH` pool with the hook, seeds liquidity, deploys the org `LeashVault` and funds it with 100k of each token (the agent holds none), issues `trader-1.leash.eth` with its policy and grants the risk-manager its two scoped roles. It ends by printing `deployments/anvil.json`.
+`setup` funds the three demo keys, registers `leash.eth` through the ENS commit/reveal registrar (paid in the testnet MockUSDC), deploys the org registry through ENS `VerifiableFactory`, deploys `LeashHook` at a mined CREATE2 address, creates the `lUSD/lETH` pool with the hook, seeds liquidity, deploys the org `LeashVault` and funds it with 100k of each token (the agent holds none), issues `trader-1.leash.eth` with its own Permissioned Resolver holding its policy (deployed through `VerifiableFactory`, records written in `initialize`) and grants the risk-manager its two scoped roles on that resolver. It ends by printing `deployments/anvil.json`.
 
 `agent` opens Claude Code with `agent/mcp.json` (the Leash MCP server, `agent/src/mcp.ts`) and the persona in `agent/prompt.md`. Claude has exactly two tools, `leash_policy` and `leash_swap`, both signed with `AGENT_PK`. Every tool call is mirrored to the dashboard's activity feed.
 
@@ -35,7 +35,7 @@ Dashboard: `trader-1.leash.eth`, status LIVE, expiry countdown (7 days), agent a
 
 Agent terminal, ask: `what is your mandate?` Claude calls `leash_policy` and answers with the cap, spent, remaining, tokens and expiry.
 
-Say: the name is the credential, the resolver holds the policy, the hook enforces it. The agent can read its leash, not change it.
+Say: the name is the credential, the agent's own resolver holds the policy, the hook enforces it. The agent can read its leash, not change it.
 
 ## Act 2: an honest order (20 s)
 
@@ -67,7 +67,7 @@ Say: we do not trust the agent's prompt, we trust the hook.
 
 ## Act 3b: the owner narrows the slippage (30 s, optional)
 
-Dashboard, owner card: type `5` in max slippage (basis points), click **set slippage**. One transaction, `setText(leash.maxSlippageBps, "5")` on the org resolver. Only the owner can: the risk manager holds no role on this key, and its **try to revoke** also fails to clear it.
+Dashboard, owner card: type `5` in max slippage (basis points), click **set slippage**. One transaction, `setText(leash.maxSlippageBps, "5")` on the agent's own resolver. Only the owner can: the risk manager holds no role on this key, and its **try to revoke** also fails to clear it.
 
 Feed: `owner sets leash.maxSlippageBps to 5 bps (0.05%)`, `OK block …, max slippage is now 5 bps`. Mandate card: max slippage 0.05%.
 
@@ -77,7 +77,7 @@ Say: the price impact bound lives in the name too. One record, no redeploy, the 
 
 ## Act 4: the risk desk tightens the leash (40 s)
 
-Dashboard, risk-manager card: type `10` in daily cap, click **tighten the leash**. The risk-manager key holds exactly one power: `ROLE_SET_TEXT` on the `leash.dailyNotional` and `leash.tokens` keys of the org resolver.
+Dashboard, risk-manager card: type `10` in daily cap, click **tighten the leash**. The risk-manager key holds exactly one power: `ROLE_SET_TEXT` on the `leash.dailyNotional` and `leash.tokens` keys of `trader-1`'s own resolver, and nothing on any other agent.
 
 Feed: `risk-manager sets leash.dailyNotional to 10 lUSD`, `OK block …, cap is now 10 lUSD`. Cap card 10, remaining 0, bar full.
 
@@ -105,7 +105,7 @@ Say: no key rotation, no redeploy. The agent still holds its key. The key is wor
 
 ## Act 6: a new agent on the spot (40 s)
 
-Dashboard, **+ New agent** tab (owner): the next free name (`trader-2`) and the demo agent address are prefilled; set cap 100 lUSD, max slippage 50 bps, mandate 1 day, **Issue agent**. Two transactions: `register` on the org registry, then one `multicall` on the resolver writing `addr`, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`. The risk manager's roles are per record key on the resolver, so they cover `trader-2` at once. The `trader-2 · LIVE` tab appears and opens. Tabs list every name the org registry issued, from its `LabelRegistered` events.
+Dashboard, **+ New agent** tab (owner): the next free name (`trader-2`) and the demo agent address are prefilled; set cap 100 lUSD, max slippage 50 bps, mandate 1 day, **Issue agent**. Three owner transactions: `VerifiableFactory.deployProxy` creates `trader-2`'s own Permissioned Resolver with `addr`, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps` written in `initialize`; `register` on the org registry points the name to it; one `multicall` on that resolver grants the risk manager its two keys. Untick **risk manager may edit this agent's cap and tokens** to issue it with no risk manager (two transactions): the Onchain facts then read `risk manager: no role on this agent`, and **tighten the leash** on `trader-2` answers `EACUnauthorizedAccountRoles`, while it still works on `trader-1`. The `trader-2 · LIVE` tab appears and opens, and the Onchain facts show its own resolver. Tabs list every name the org registry issued, from its `LabelRegistered` events.
 
 Agent terminal: `buy 20 lUSD of lETH as trader-2`. Same key, a second name, its own mandate: `spent today 20 lUSD of 100 lUSD`, slippage requested at 45 bps (90% of 50).
 

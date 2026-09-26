@@ -38,7 +38,7 @@ repo root.
 `scripts/demo-server.ts` is a Vite plugin active under `bun run dev`. It keeps an in-memory activity feed
 (`/api/agent-events`, fed by the agent's MCP server) and performs the two human actions of the demo with the
 keys from the repo root `.env`: `/api/demo/tighten` (risk-manager, `setText(leash.dailyNotional)`),
-`/api/demo/forbid` (risk-manager tries to revoke, must revert) `/api/demo/cut` (owner, `unregister`), `/api/demo/fund` (owner, mints test tokens to the org vault) and `/api/demo/issue` (owner, `register` a new or expired agent subname, then write its whole policy in one resolver `multicall`).
+`/api/demo/forbid` (risk-manager tries to revoke, must revert) `/api/demo/cut` (owner, `unregister`), `/api/demo/fund` (owner, mints test tokens to the org vault) and `/api/demo/issue` (owner: deploy the agent's own Permissioned Resolver with its whole policy written in `initialize`, `register` the new or expired subname pointing to it, then grant the risk manager on that resolver unless `delegateRisk` is false). Every resolver write goes to the selected agent's own resolver, read from the registry when the action runs.
 Keys never reach the browser. The static build has no plugin: the feed shows offline and the controls hide.
 
 ## URL parameters
@@ -55,7 +55,9 @@ The settings drawer (top right) edits the same values and also accepts a pasted 
 
 - Registry: `getOwner(labelId)`, `getExpiry(labelId)`, `getResolver(label)` with `labelId = uint256(keccak256(label))`.
 - Hook: `policy(label)`, `spentToday(node)`, `nonces(node)`, and `LeashSwap` logs over the last 5000 blocks (chunked by 1000, then incremental per poll).
-- Resolver fallback: when `policy()` reverts (revoked or expired name) the last known records are read through `resolve(dnsName, text(...) | addr(...))` and marked "last known".
+- Each agent's own resolver: `getResolver(label)` while the name is live; once it is cut, the last one from the registry's `ResolverUpdated` events. The resolver's `hasRoles` tells whether the risk manager may edit this agent.
+- Resolver fallback: when `policy()` reverts (revoked or expired name) the last known records are read from the agent's own resolver through `resolve(dnsName, text(...) | addr(...))` and marked "last known".
+- Activity: the hook, the vault, the registry, and every agent's resolver, found through the factory's `ProxyDeployed` events from the owner and the registry's `ResolverUpdated` events.
 
 Status pill: LIVE, EXPIRING (under 10 minutes left), REVOKED (expiry at or before chain time, or the hook reverts `LeashRevoked`). Remaining is computed as `cap - spentToday` client side.
 
