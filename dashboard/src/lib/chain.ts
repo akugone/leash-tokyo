@@ -32,6 +32,16 @@ export const LOG_LOOKBACK = 5_000n;
 export const LOG_CHUNK = 1_000n;
 export const MAX_SWAPS = 10;
 
+/// Blocks read again on every incremental scan. A public RPC balances requests across nodes: the head can come
+/// from a node a block or two ahead of the one that serves the logs, whose last blocks then read empty. Without
+/// the overlap those events would never be read. Callers dedupe what they read twice.
+export const RESCAN_BLOCKS = 8n;
+
+/// Start of the next incremental scan after `scannedTo`, overlapping the last `RESCAN_BLOCKS`.
+export function rescanFrom(scannedTo: bigint): bigint {
+  return scannedTo >= RESCAN_BLOCKS ? scannedTo - RESCAN_BLOCKS + 1n : 0n;
+}
+
 export type Policy = {
   agent: Address;
   quote: Address;
@@ -439,7 +449,7 @@ export async function fetchSnapshot(
   let scannedTo = previous?.scannedTo ?? null;
   if (block.value) {
     const latest = block.value.number;
-    const from = scannedTo !== null ? scannedTo + 1n : lookbackStart(latest, LOG_LOOKBACK);
+    const from = scannedTo !== null ? rescanFrom(scannedTo) : lookbackStart(latest, LOG_LOOKBACK);
     if (from <= latest) {
       try {
         swaps = mergeSwaps(swaps, await fetchSwaps(client, deployments.hook, node, from, latest));

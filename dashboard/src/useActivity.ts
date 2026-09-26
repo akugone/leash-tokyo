@@ -6,7 +6,7 @@ import {
   txsNeedingSender,
   type ActivityItem,
 } from "./lib/activity";
-import { AGENT_LOG_CHUNK, LOG_LOOKBACK } from "./lib/chain";
+import { AGENT_LOG_CHUNK, LOG_LOOKBACK, rescanFrom } from "./lib/chain";
 import { blockRanges, lookbackStart, type Deployments } from "./lib/leash";
 
 const ACTIVITY_POLL_MS = 10_000;
@@ -20,9 +20,11 @@ export function useActivity(client: PublicClient | null, deployments: Deployment
   const logs = useRef<Awaited<ReturnType<typeof fetchActivityLogs>>>([]);
   const senders = useRef(new Map<Hex, Address>());
   const scannedTo = useRef<bigint | null>(null);
+  const seen = useRef(new Set<string>());
 
   useEffect(() => {
     logs.current = [];
+    seen.current = new Set();
     senders.current = new Map();
     scannedTo.current = null;
     setItems([]);
@@ -38,12 +40,18 @@ export function useActivity(client: PublicClient | null, deployments: Deployment
         const head = await client.getBlockNumber();
         const from =
           scannedTo.current !== null
-            ? scannedTo.current + 1n
+            ? rescanFrom(scannedTo.current)
             : deployments.orgRegistryBlock
               ? BigInt(deployments.orgRegistryBlock)
               : lookbackStart(head, LOG_LOOKBACK);
         for (const range of from <= head ? blockRanges(from, head, AGENT_LOG_CHUNK) : []) {
-          logs.current.push(...(await fetchActivityLogs(client, deployments, range.from, range.to)));
+          // The scan overlaps its last blocks (rescanFrom): keep each log once.
+          for (const log of await fetchActivityLogs(client, deployments, range.from, range.to)) {
+            const key = `${log.transactionHash}:${log.logIndex}`;
+            if (seen.current.has(key)) continue;
+            seen.current.add(key);
+            logs.current.push(log);
+          }
           scannedTo.current = range.to;
         }
         // Who wrote each policy change: one lookup per transaction, cached.
