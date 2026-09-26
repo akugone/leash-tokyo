@@ -74,10 +74,10 @@ function Nav() {
           <Logo className="lp-logo" /> Leash
         </a>
         <nav className="lp-links" aria-label="Sections">
-          <a href="#what">What</a>
+          <a href="#what">Why</a>
+          <a href="#solves">What it solves</a>
           <a href="#use-cases">Use cases</a>
           <a href="#how">How it works</a>
-          <a href="#hook">Hook</a>
           <a href="#start">Get started</a>
           <a href="#market">Market</a>
         </nav>
@@ -219,10 +219,13 @@ function WhatAndWho() {
 }
 
 function Problems() {
-  const problems = [
-    { t: "All or nothing keys", d: "A bot's key holds full authority over everything the account can touch." },
-    { t: "One leak, empty treasury", d: "If the key leaks or the agent misbehaves, funds leave in one block." },
-    { t: "Slow revocation", d: "Stopping an agent means rotating keys and redeploying, not flipping a switch." },
+  const solves = [
+    { t: "The AI gets it wrong, or is manipulated", d: "Hallucinations and prompt injection cannot bypass the rules: they live onchain, and the chain says no." },
+    { t: "A bot runs away overnight", d: "A daily cap bounds the losses, counted on the amount really traded." },
+    { t: "Revoking takes hours", d: "Unregister the subname in one transaction. The next swap reverts." },
+    { t: "Mandates never expire", d: "Every subname has a native expiry. A forgotten test bot loses its rights on its own." },
+    { t: "One person holds every power", d: "A risk manager tunes the cap and tokens, but cannot create or revoke agents." },
+    { t: "Guardrails nobody can check", d: "The policy is plain text in ENS. Every swap emits an event tied to the agent's name." },
   ];
   const cases: { icon: IconName; title: string; body: string }[] = [
     { icon: "coin", title: "Daily notional caps", body: "Cap what an agent can move per UTC day, measured on the real settlement delta, not an oracle." },
@@ -237,23 +240,23 @@ function Problems() {
   return (
     <section className="lp-section lp-alt">
       <div className="lp-wrap">
-        <SectionHead id="use-cases" eyebrow="02 · The problem" title="Delegating to a bot is all or nothing.">
+        <SectionHead id="solves" eyebrow="02 · What it solves" title="Delegation to bots is all or nothing today.">
           Treasuries and desks hand private keys to bots and AI agents. There is no onchain answer
           to a simple question: is this address still allowed to trade for us, and within what
           limits?
         </SectionHead>
-        <div className="lp-problems">
-          {problems.map((p) => (
-            <div key={p.t}>
-              <span className="lp-ko">✕</span>
-              <div>
-                <b>{p.t}</b>
-                <p>{p.d}</p>
-              </div>
-            </div>
+        <div className="lp-grid lp-grid-3">
+          {solves.map((p) => (
+            <article className="lp-card lp-solve" key={p.t}>
+              <h4>
+                <span className="lp-solve-mark" aria-hidden="true">✕</span>
+                {p.t}
+              </h4>
+              <p>{p.d}</p>
+            </article>
           ))}
         </div>
-        <h3 className="lp-h3">What Leash lets you do</h3>
+        <h3 className="lp-h3" id="use-cases">What Leash lets you do</h3>
         <div className="lp-grid lp-grid-3">
           {cases.map((c) => (
             <article className="lp-card" key={c.title}>
