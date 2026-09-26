@@ -591,6 +591,11 @@ textarea {
   margin: 0 0 16px;
 }
 
+/* No role cards (hosted build without a wallet): the feed takes the whole row. */
+.ops > :only-child {
+  grid-column: 1 / -1;
+}
+
 @media (max-width: 860px) {
   .ops {
     grid-template-columns: 1fr;
@@ -755,6 +760,35 @@ textarea {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+
+.wallet-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-alt);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.wallet-bar p {
+  margin: 0;
+  max-width: 44ch;
+}
+
+.wallet-bar b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.role-gate {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
 }
 
 .role {

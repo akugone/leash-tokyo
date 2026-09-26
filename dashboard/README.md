@@ -28,7 +28,9 @@ from the repo root. It copies `deployments/sepolia.json`, and points both the br
 `vercel.json` at the repo root builds this folder with `LEASH_ENV=sepolia`, so the site reads the committed
 `deployments/sepolia.json`. `.env.production` sets the default RPC to a public Sepolia endpoint (`VITE_LEASH_RPC`):
 never a keyed RPC, it ships in the bundle. `.vercelignore` uploads only `dashboard/` and `deployments/`. The hosted
-site is read only: no dev server, so no demo controls and no activity feed. Deploy with `vercel --prod` from the
+site has no dev server, so no activity feed. Its owner and risk-manager cards sign with a connected wallet
+through Reown AppKit (`VITE_REOWN_PROJECT_ID`, public, allowed domains set in the Reown dashboard): import both
+accounts in the wallet and switch between them. "Try to revoke" is a simulation and needs no wallet. Deploy with `vercel --prod` from the
 repo root.
 
 ## Demo mode (dev server only)

@@ -18,12 +18,10 @@ import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import {
-  BaseError,
   createPublicClient,
   createWalletClient,
   defineChain,
   http,
-  parseAbi,
   parseUnits,
   type Address,
   type Hex,
@@ -31,22 +29,19 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import type { Plugin } from "vite";
-import { dnsEncode, labelId, slippageInputError } from "../src/lib/leash";
+import {
+  cutCall,
+  forbiddenCalls,
+  forbiddenOutcome,
+  registryWriteAbi,
+  slippageCall,
+  tightenCall,
+  type LeashTarget,
+} from "../src/lib/actions";
+import { labelId, slippageInputError } from "../src/lib/leash";
 
 const repoDir = resolve(__dirname, "..", "..");
 const MAX_EVENTS = 200;
-const EAC_UNAUTHORIZED = "0x4b27a133"; // EACUnauthorizedAccountRoles(uint256,uint256,address)
-
-const resolverWriteAbi = parseAbi([
-  "function setText(bytes name, string key, string value)",
-  "function setAddress(bytes name, uint256 coinType, bytes addr)",
-  "function resolve(bytes name, bytes data) view returns (bytes)",
-]);
-const registryWriteAbi = parseAbi([
-  "function unregister(uint256 anyId)",
-  "function getExpiry(uint256 anyId) view returns (uint64)",
-]);
-
 type FeedEvent = {
   id: number;
   ts: number;
@@ -99,12 +94,17 @@ function context() {
     const account = privateKeyToAccount(pk as Hex);
     return { account, client: createWalletClient({ account, chain, transport: http(rpc) }) };
   };
-  const name = dnsEncode(`${d.agentLabel}.${d.parentName}`);
+  const target: LeashTarget = {
+    label: d.agentLabel,
+    parentName: d.parentName,
+    registry: d.orgRegistry as Address,
+    resolver: d.orgResolver as Address,
+  };
   return {
     d,
     rpc,
     publicClient,
-    name,
+    target,
     fullName: `${d.agentLabel}.${d.parentName}`,
     resolver: d.orgResolver as Address,
     registry: d.orgRegistry as Address,
@@ -115,19 +115,6 @@ function context() {
       : null,
     ownerAddress: env.OWNER_PK ? privateKeyToAccount(env.OWNER_PK as Hex).address : null,
   };
-}
-
-function revertSelector(err: unknown): string | null {
-  if (!(err instanceof BaseError)) return null;
-  const found = err.walk(
-    (e) =>
-      typeof (e as { data?: unknown }).data === "string" ||
-      typeof (e as { raw?: unknown }).raw === "string",
-  );
-  const data =
-    (found as { raw?: string; data?: string } | null)?.raw ??
-    (found as { data?: string } | null)?.data;
-  return typeof data === "string" && data.length >= 10 ? data.slice(0, 10).toLowerCase() : null;
 }
 
 // ============ Actions ============
@@ -142,10 +129,7 @@ async function tighten(capHuman: string) {
     text: `risk-manager sets leash.dailyNotional to ${capHuman} lUSD (${raw})`,
   });
   const txHash = await client.writeContract({
-    address: ctx.resolver,
-    abi: resolverWriteAbi,
-    functionName: "setText",
-    args: [ctx.name, "leash.dailyNotional", raw],
+    ...tightenCall(ctx.target, capHuman),
     account,
     chain: client.chain,
   });
@@ -162,56 +146,13 @@ async function tighten(capHuman: string) {
 async function forbid() {
   const ctx = context();
   const { account } = ctx.riskManager();
-  const attempts = [
-    {
-      what: "unregister(trader) by risk-manager",
-      call: {
-        address: ctx.registry,
-        abi: registryWriteAbi,
-        functionName: "unregister",
-        args: [labelId(ctx.d.agentLabel)],
-      },
-    },
-    {
-      what: "setAddress(agent) by risk-manager",
-      call: {
-        address: ctx.resolver,
-        abi: resolverWriteAbi,
-        functionName: "setAddress",
-        args: [ctx.name, 60n, account.address],
-      },
-    },
-    {
-      what: "setText(leash.quote) by risk-manager",
-      call: {
-        address: ctx.resolver,
-        abi: resolverWriteAbi,
-        functionName: "setText",
-        args: [ctx.name, "leash.quote", account.address],
-      },
-    },
-    {
-      what: "setText(leash.maxSlippageBps) by risk-manager",
-      call: {
-        address: ctx.resolver,
-        abi: resolverWriteAbi,
-        functionName: "setText",
-        args: [ctx.name, "leash.maxSlippageBps", ""],
-      },
-    },
-  ] as const;
-  const results: { what: string; ok: boolean; text: string }[] = [];
-  for (const a of attempts) {
+  const results: { ok: boolean; text: string }[] = [];
+  for (const a of forbiddenCalls(ctx.target, account.address)) {
     try {
       await ctx.publicClient.simulateContract({ ...a.call, account } as never);
-      results.push({ what: a.what, ok: false, text: `FAIL ${a.what} -> unexpectedly allowed` });
+      results.push(forbiddenOutcome(a.what, null));
     } catch (err) {
-      const sel = revertSelector(err);
-      const reason =
-        sel === EAC_UNAUTHORIZED
-          ? "EACUnauthorizedAccountRoles"
-          : `reverted${sel ? ` (${sel})` : ""}`;
-      results.push({ what: a.what, ok: true, text: `PASS ${a.what} -> ${reason}` });
+      results.push(forbiddenOutcome(a.what, err));
     }
   }
   for (const r of results) push({ source: "risk", kind: r.ok ? "denied" : "error", text: r.text });
@@ -228,10 +169,7 @@ async function setSlippage(bps: string) {
     text: `owner sets leash.maxSlippageBps to ${bps} bps (${Number(bps) / 100}%)`,
   });
   const txHash = await client.writeContract({
-    address: ctx.resolver,
-    abi: resolverWriteAbi,
-    functionName: "setText",
-    args: [ctx.name, "leash.maxSlippageBps", bps],
+    ...slippageCall(ctx.target, bps),
     account,
     chain: client.chain,
   });
@@ -255,10 +193,7 @@ async function cut() {
     text: `owner cuts ${ctx.fullName}: unregister(labelId)`,
   });
   const txHash = await client.writeContract({
-    address: ctx.registry,
-    abi: registryWriteAbi,
-    functionName: "unregister",
-    args: [id],
+    ...cutCall(ctx.target),
     account,
     chain: client.chain,
   });

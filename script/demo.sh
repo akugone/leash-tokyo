@@ -186,7 +186,7 @@ dashboard)
     mkdir -p dashboard/public
     cp "$LEASH_DEPLOYMENTS_FILE" dashboard/public/deployments.json
     export RPC_URL="$RPC" VITE_LEASH_RPC="$RPC"
-    echo "dashboard on $NETWORK: $DASHBOARD_URL/app?label=${AGENT_LABEL:-trader-1}"
+    echo "dashboard on $NETWORK: http://localhost:${PORT:-5173}/app?label=${AGENT_LABEL:-trader-1}"
     cd dashboard && exec bun run dev
     ;;
 tighten)
