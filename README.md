@@ -127,7 +127,11 @@ The same acts run against the live Sepolia deployment: prefix any command with `
 
 Step by step script with expected output: [docs/demo.md](docs/demo.md). Reset between runs: restart `script/demo.sh anvil`, run `setup` again (it also clears the dashboard feed), reload the dashboard.
 
-## Why ENSv2 is the product, not decoration
+## Why ENSv2 and Uniswap v4 are the product, not decoration
+
+Leash is two halves that need each other: ENSv2 says who may trade and within what limits, Uniswap v4 enforces it on the swap itself.
+
+**ENSv2 holds the mandate**
 
 | Primitive | Role in Leash |
 |---|---|
@@ -136,7 +140,16 @@ Step by step script with expected output: [docs/demo.md](docs/demo.md). Reset be
 | Permissioned Resolver | Where the risk policy actually lives, readable onchain by the hook |
 | Enhanced Access Control | Per record key delegation: the risk desk edits `leash.dailyNotional`, never the name |
 
-Strip ENS out and the design collapses into a bespoke allowlist contract. That is the test it passes.
+**Uniswap v4 enforces it**
+
+| Primitive | Role in Leash |
+|---|---|
+| Hooks | A pool created with the Leash hook cannot be swapped without it: every trade goes through the checks, whoever routes it |
+| `beforeSwap` | Recovers the intent's signer and compares it to the name's `addr` record, checks the token allowlist and that `sqrtPriceLimitX96` stays within `leash.maxSlippageBps` |
+| `hookData` | Carries the agent's EIP-712 signed intent, so the hook ignores `msg.sender`: any v4 router works, no trusted router |
+| `afterSwap` and `BalanceDelta` | The daily cap counts the real settled quote token amount, not a quoted or claimed one |
+
+Strip ENS out and the policy has nowhere to live: the design collapses into a bespoke allowlist contract. Strip Uniswap v4 out and nothing enforces the policy at the moment of the trade: you are back to a trusted router, or a bot promising to behave. Leash passes both tests.
 
 ## Trust model
 
