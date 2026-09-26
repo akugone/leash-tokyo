@@ -21,6 +21,9 @@
 #                                                 #   and AGENT_TTL (default 30 days) in seconds
 #   LEASH_NETWORK=sepolia script/demo.sh verify   # verify hook, vault and tokens on Etherscan (ETHERSCAN_API_KEY)
 #
+# Either network:
+#   script/demo.sh migrate-vault   # deploy a fresh LeashVault and move the pool tokens over (owner signs)
+#
 # Requires: foundry, a .env with SEPOLIA_RPC_URL, OWNER_PK, RISK_MANAGER_PK, AGENT_PK (see .env.example).
 set -euo pipefail
 
@@ -180,6 +183,10 @@ verify)
         verify "$token" src/mocks/LeashTestToken.sol:LeashTestToken \
             "$(cast abi-encode 'f(string,string)' "$(cast call "$token" 'name()(string)' --rpc-url "$RPC" | tr -d '"')" "$(cast call "$token" 'symbol()(string)' --rpc-url "$RPC" | tr -d '"')")"
     done
+    ;;
+migrate-vault)
+    if [ "$NETWORK" = sepolia ]; then live_script script/MigrateVault.s.sol; else script script/MigrateVault.s.sol; fi
+    jq '{vault, vaultPrevious}' "$LEASH_DEPLOYMENTS_FILE"
     ;;
 dashboard)
     # Local dev server: the browser and the demo controls both use this network's RPC and record.
