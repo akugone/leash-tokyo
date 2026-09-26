@@ -1,29 +1,34 @@
 /*
- * Leash dashboard. One hero, the leash, then a quiet console.
- * Type: Bricolage Grotesque for words and big figures, JetBrains Mono only for addresses and hashes.
+ * Leash dashboard, in the landing's language: white page, black ink, hairline borders, generous whitespace.
+ * Inter for words and big figures, JetBrains Mono for addresses, hashes and amounts.
+ * Colour only carries state: green live, amber risk desk and expiring, red owner and revoked, blue agent.
  */
 :root {
-  color-scheme: dark;
-  --bg: #0f1720;
-  --bg-deep: #0a1017;
-  --panel: #151f2a;
-  --panel-2: #1a2531;
-  --line: #24313f;
-  --line-strong: #34455a;
-  --fg: #e8eef4;
-  --fg-2: #b7c3cf;
-  --muted: #7f8e9c;
-  --green: #31c48d;
-  --green-deep: #1f8f66;
-  --amber: #e0a63a;
-  --red: #ef5a68;
-  --red-deep: #b83a48;
-  --indigo: #8da2ff;
-  --sans: "Bricolage Grotesque", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-alt: #f7f7f5;
+  --panel: #ffffff;
+  --line: #e9e9e7;
+  --line-strong: #d3d3d0;
+  --fg: #191919;
+  --fg-2: #37352f;
+  --muted: #787774;
+  --code-bg: #f7f6f3;
+  --green: #0f7b6c;
+  --green-soft: #e7f3f1;
+  --amber: #b86e00;
+  --amber-soft: #fbf3db;
+  --red: #d44c47;
+  --red-soft: #fdebec;
+  --blue: #2e6fd1;
+  --blue-soft: #e7f0fb;
+  --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --r-hero: 16px;
-  --r-panel: 12px;
+  --r-hero: 12px;
+  --r-panel: 10px;
   --r-control: 8px;
+  --shadow: 0 1px 2px rgba(15, 15, 15, 0.04), 0 12px 32px rgba(15, 15, 15, 0.06);
+  --logo-cut: var(--bg);
 }
 
 * {
@@ -33,10 +38,9 @@
 html,
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--bg-alt);
   color: var(--fg);
-  font: 14px/1.45 var(--sans);
-  font-optical-sizing: auto;
+  font: 14px/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -49,6 +53,10 @@ h2 {
 h2 {
   font-size: 14px;
   letter-spacing: -0.005em;
+}
+
+a {
+  color: inherit;
 }
 
 button,
@@ -69,66 +77,82 @@ table {
 }
 
 code {
-  font-size: 0.92em;
-  color: var(--fg-2);
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  color: #eb5757;
 }
 
 :focus-visible {
-  outline: 2px solid var(--indigo);
+  outline: 2px solid var(--blue);
   outline-offset: 2px;
 }
 
 .app {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 14px 20px 36px;
+  padding: 24px 24px 40px;
 }
 
 .pending {
   color: var(--muted);
 }
 
-/* ============ Header ============ */
+/* ============ Top bar, same as the landing nav ============ */
 
-.header {
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: saturate(180%) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 4px 0 14px;
+  gap: 10px;
+  max-width: 1080px;
+  height: 56px;
+  margin: 0 auto;
+  padding: 0 24px;
 }
 
 .brand {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  text-decoration: none;
+  color: var(--fg);
+  flex: none;
 }
 
 .logo {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border-radius: 5px;
-  background: linear-gradient(90deg, var(--green) 0 42%, transparent 42% 58%, var(--green) 58%);
-  align-self: center;
+  width: 20px;
+  height: 20px;
+  color: var(--fg);
+  transition: color 0.3s ease;
 }
 
 .status-revoked .logo {
-  background: var(--red);
+  color: var(--red);
 }
 
-.title {
-  font-weight: 700;
-  font-size: 19px;
-  letter-spacing: -0.02em;
+.crumb {
+  color: var(--line-strong);
+  font-size: 18px;
+  font-weight: 300;
 }
 
 .name {
-  font-size: 15px;
+  min-width: 0;
+  font-size: 14px;
   font-weight: 500;
-  color: var(--fg);
+  color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -137,60 +161,65 @@ code {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
 }
+
+/* ============ Status pill ============ */
 
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 12px 5px 9px;
+  height: 28px;
+  padding: 0 12px 0 10px;
   border-radius: 999px;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
   border: 1px solid var(--line);
-  background: var(--panel);
+  background: var(--bg);
+  color: var(--muted);
 }
 
 .pill .dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--line-strong);
 }
 
 .pill-live {
   color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  background: var(--green-soft);
+  border-color: transparent;
 }
 .pill-live .dot {
   background: var(--green);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 25%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
   animation: breathe 2.4s ease-in-out infinite;
 }
 .pill-expiring {
   color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+  background: var(--amber-soft);
+  border-color: transparent;
 }
 .pill-expiring .dot {
   background: var(--amber);
   animation: breathe 0.9s ease-in-out infinite;
 }
 .pill-revoked {
-  color: #ffd7dc;
-  border-color: var(--red);
-  background: color-mix(in srgb, var(--red) 22%, var(--panel));
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: transparent;
 }
 .pill-revoked .dot {
   background: var(--red);
 }
-.pill-unknown {
-  color: var(--muted);
-}
 
 @keyframes breathe {
   50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--green) 10%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--green) 6%, transparent);
   }
 }
 
@@ -211,56 +240,87 @@ code {
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-radius: var(--r-control);
-  background: var(--panel);
+  background: var(--bg);
+  color: var(--fg-2);
   font-size: 13px;
   word-break: break-word;
 }
 
 .banner.error {
-  border-color: color-mix(in srgb, var(--red) 55%, transparent);
-  color: #ffc3c9;
+  border-color: color-mix(in srgb, var(--red) 35%, var(--line));
+  background: var(--red-soft);
+  color: var(--red);
 }
 
-/* ============ Buttons and inputs ============ */
+/* ============ Buttons and inputs, same as the landing ============ */
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
   cursor: pointer;
-  padding: 7px 14px;
   border-radius: var(--r-control);
   border: 1px solid var(--line-strong);
-  background: var(--panel-2);
-  font-size: 13px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
   font-weight: 500;
   transition:
     background 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 button:hover {
-  border-color: var(--fg-2);
+  background: var(--bg-alt);
 }
 
 button.ghost {
+  border-color: transparent;
   background: transparent;
   color: var(--fg-2);
 }
 
+button.ghost:hover {
+  background: var(--bg-alt);
+}
+
+/* In the role cards, secondary actions keep a border, like the landing's white button. */
+.role-row button.ghost {
+  border-color: var(--line-strong);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.role-row button.ghost:hover {
+  background: var(--bg-alt);
+}
+
 button.small {
-  padding: 3px 9px;
+  height: 26px;
+  padding: 0 10px;
   font-size: 12px;
 }
 
 button:disabled,
 button.ghost:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
+button:disabled:hover {
+  background: inherit;
+}
+
 button.copy {
+  height: auto;
   border: none;
   background: none;
   padding: 0 0 0 5px;
@@ -268,26 +328,33 @@ button.copy {
   font-size: 11px;
 }
 
+/* Primary action: the landing's dark button. */
 .btn {
-  border-color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 22%, var(--panel));
-  color: #ffe9bd;
-  font-weight: 600;
+  background: var(--fg);
+  border-color: var(--fg);
+  color: #fff;
 }
 
 .btn:hover {
-  background: color-mix(in srgb, var(--amber) 34%, var(--panel));
-  border-color: var(--amber);
+  background: #000;
+}
+
+.btn:disabled:hover {
+  background: var(--fg);
 }
 
 .btn.danger {
-  border-color: var(--red);
-  background: color-mix(in srgb, var(--red) 22%, var(--panel));
-  color: #ffd7dc;
+  background: var(--bg);
+  border-color: color-mix(in srgb, var(--red) 55%, var(--line));
+  color: var(--red);
 }
 
 .btn.danger:hover {
-  background: color-mix(in srgb, var(--red) 36%, var(--panel));
+  background: var(--red-soft);
+}
+
+.btn.danger:disabled:hover {
+  background: var(--bg);
 }
 
 input,
@@ -297,51 +364,51 @@ textarea {
   padding: 7px 10px;
   border-radius: var(--r-control);
   border: 1px solid var(--line-strong);
-  background: var(--bg-deep);
+  background: var(--bg);
   font-size: 13px;
+  transition: border-color 0.15s ease;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--fg-2);
+  outline: none;
 }
 
 textarea {
   resize: vertical;
 }
 
-/* ============ Hero: the leash ============ */
+/* ============ Hero: the leash, on the landing's dotted grid ============ */
 
 .leash {
   position: relative;
-  margin: 0 0 14px;
-  padding: 20px 22px 16px;
+  margin: 0 0 16px;
+  padding: 24px 26px 18px;
   border: 1px solid var(--line);
   border-radius: var(--r-hero);
-  background:
-    radial-gradient(
-      120% 140% at 0% 0%,
-      color-mix(in srgb, var(--green) 9%, transparent),
-      transparent 55%
-    ),
-    var(--panel);
+  background-color: var(--bg);
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 22px 22px;
+  box-shadow: var(--shadow);
   overflow: hidden;
 }
 
-.leash.tone-expiring {
-  background:
-    radial-gradient(
-      120% 140% at 0% 0%,
-      color-mix(in srgb, var(--amber) 12%, transparent),
-      transparent 55%
-    ),
-    var(--panel);
+.leash::before {
+  /* fades the dots behind the figures, like the landing hero */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #fff 30%, rgba(255, 255, 255, 0.6) 100%);
+  pointer-events: none;
+}
+
+.leash > * {
+  position: relative;
 }
 
 .leash.cut {
-  border-color: color-mix(in srgb, var(--red) 55%, var(--line));
-  background:
-    radial-gradient(
-      120% 140% at 0% 0%,
-      color-mix(in srgb, var(--red) 16%, transparent),
-      transparent 60%
-    ),
-    var(--panel);
+  border-color: color-mix(in srgb, var(--red) 40%, var(--line));
 }
 
 .leash-top {
@@ -350,7 +417,7 @@ textarea {
   align-items: flex-end;
   gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 
 .leash-figure {
@@ -362,21 +429,25 @@ textarea {
 
 .leash-spent-num {
   font-family: var(--sans);
-  font-size: 44px;
+  font-size: 48px;
   font-weight: 700;
   line-height: 1;
-  letter-spacing: -0.03em;
-  font-variation-settings: "opsz" 96;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
   transition: color 0.4s ease;
 }
 
 .leash.cut .leash-spent-num {
-  color: var(--fg-2);
+  color: var(--muted);
+}
+
+.leash.over .leash-spent-num {
+  color: var(--red);
 }
 
 .leash-of {
   font-size: 15px;
-  color: var(--fg-2);
+  color: var(--muted);
 }
 
 .leash-expiry {
@@ -388,9 +459,9 @@ textarea {
 
 .leash-expiry-num {
   font-family: var(--sans);
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .leash.tone-expiring .leash-expiry-num {
@@ -399,7 +470,6 @@ textarea {
 
 .leash.cut .leash-expiry-num {
   color: var(--red);
-  text-transform: none;
 }
 
 .leash-expiry-hint {
@@ -414,27 +484,36 @@ textarea {
 }
 
 .post {
-  width: 10px;
-  height: 26px;
+  width: 8px;
+  height: 24px;
   border-radius: 3px;
-  background: var(--fg-2);
+  background: var(--fg);
   flex: none;
 }
 
 .leash-track {
   position: relative;
   flex: 1;
-  height: 10px;
-  border-radius: 5px;
-  background: var(--bg-deep);
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-alt);
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .leash-spent {
   height: 100%;
-  border-radius: 5px;
-  background: linear-gradient(90deg, var(--green-deep), var(--green) 60%, var(--amber));
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--green),
+    color-mix(in srgb, var(--green) 55%, var(--amber)) 70%,
+    var(--amber)
+  );
   transition: width 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.leash.over .leash-spent {
+  background: var(--red);
 }
 
 .collar {
@@ -446,8 +525,12 @@ textarea {
   border: 3px solid var(--fg);
   background: var(--bg);
   transform: translate(-50%, -50%);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 8px rgba(15, 15, 15, 0.15);
   transition: left 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.leash.over .collar {
+  border-color: var(--red);
 }
 
 .cap-mark {
@@ -463,8 +546,8 @@ textarea {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 12px;
-  padding-left: 22px;
+  margin-top: 14px;
+  padding-left: 20px;
   color: var(--muted);
   font-size: 13px;
 }
@@ -475,8 +558,9 @@ textarea {
 }
 
 .leash.cut .leash-track {
-  background: repeating-linear-gradient(90deg, var(--red-deep) 0 8px, transparent 8px 16px);
+  background: repeating-linear-gradient(90deg, var(--red) 0 8px, transparent 8px 16px);
   box-shadow: none;
+  opacity: 0.6;
 }
 
 .leash.cut .leash-spent {
@@ -494,8 +578,8 @@ textarea {
 }
 
 .danger {
-  color: #ffd7dc;
-  font-weight: 600;
+  color: var(--red);
+  font-weight: 500;
 }
 
 /* ============ Console: activity and controls ============ */
@@ -503,8 +587,8 @@ textarea {
 .ops {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
-  gap: 12px;
-  margin: 0 0 14px;
+  gap: 16px;
+  margin: 0 0 16px;
 }
 
 @media (max-width: 860px) {
@@ -524,10 +608,9 @@ textarea {
   min-width: 0;
 }
 
-.feed,
 .swaps,
 .drawer {
-  padding: 14px 16px;
+  padding: 16px 18px;
 }
 
 .section-head {
@@ -536,7 +619,7 @@ textarea {
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .section-head .hint,
@@ -546,53 +629,81 @@ textarea {
   font-size: 12px;
 }
 
-.feed-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
+/* The activity feed reads like the landing's hook console: a window bar, then mono lines. */
+.feed {
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.feed .section-head {
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-alt);
+  align-items: center;
+}
+
+.feed .section-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.feed .section-head h2::before {
+  /* the console's window dots */
+  content: "";
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--line-strong);
-  margin-left: 8px;
-  vertical-align: middle;
+  box-shadow:
+    16px 0 0 var(--line-strong),
+    32px 0 0 var(--line-strong);
+  margin-right: 38px;
+}
+
+.feed-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
   transition: background 0.3s ease;
 }
 
 .feed-dot.on {
-  background: var(--indigo);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--indigo) 22%, transparent);
+  background: var(--blue);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 18%, transparent);
 }
 
 .feed-list {
   list-style: none;
   margin: 0;
-  padding: 0;
-  max-height: 300px;
+  padding: 6px 0;
+  max-height: 320px;
   overflow-y: auto;
   font-size: 13px;
 }
 
 .feed-row {
   display: grid;
-  grid-template-columns: 60px 92px minmax(0, 1fr);
+  grid-template-columns: 64px 96px minmax(0, 1fr);
   gap: 12px;
-  padding: 7px 2px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  line-height: 1.4;
-  animation: settle 0.35s ease-out;
+  padding: 7px 16px;
+  line-height: 1.45;
+  animation: settle 0.5s ease-out;
 }
 
 @keyframes settle {
   from {
-    background: color-mix(in srgb, var(--indigo) 12%, transparent);
+    background: var(--blue-soft);
   }
-}
-
-.feed-row:first-child {
-  border-top: 0;
 }
 
 .feed-row.empty {
   display: block;
+  padding: 18px 16px;
   color: var(--muted);
   animation: none;
 }
@@ -610,7 +721,7 @@ textarea {
 }
 
 .src-agent {
-  color: var(--indigo);
+  color: var(--blue);
 }
 
 .src-risk {
@@ -624,6 +735,8 @@ textarea {
 .feed-text {
   overflow-wrap: anywhere;
   color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 12.5px;
 }
 
 .kind-ok .feed-text,
@@ -634,7 +747,7 @@ textarea {
 .kind-revert .feed-text,
 .kind-error .feed-text,
 .kind-cut .feed-text {
-  color: #ffb9bf;
+  color: var(--red);
 }
 
 .controls {
@@ -645,7 +758,7 @@ textarea {
 }
 
 .role {
-  padding: 14px 16px;
+  padding: 16px 18px;
   border-left: 3px solid var(--amber);
 }
 
@@ -676,10 +789,11 @@ textarea {
 }
 
 .role-hint {
-  margin: 4px 0 12px;
-  font-size: 12.5px;
+  margin: 4px 0 14px;
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--muted);
-  max-width: 44ch;
+  max-width: 46ch;
 }
 
 .role-row {
@@ -699,8 +813,9 @@ textarea {
 
 .field input {
   width: 6.5em;
+  height: 34px;
   margin: 0;
-  padding: 6px 10px;
+  padding: 0 10px;
   text-align: right;
 }
 
@@ -709,35 +824,40 @@ textarea {
 }
 
 .outcome {
-  margin-top: 10px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
   font-size: 12.5px;
   overflow-wrap: anywhere;
 }
 
 .outcome.ok {
   color: var(--green);
+  background: var(--green-soft);
 }
 
 .outcome.bad {
-  color: #ffb9bf;
+  color: var(--red);
+  background: var(--red-soft);
 }
 
 .outcome.info {
   color: var(--muted);
+  background: var(--bg-alt);
 }
 
 /* ============ Facts ============ */
 
 .facts {
-  margin: 0 0 14px;
-  padding: 4px 16px;
+  margin: 0 0 16px;
+  padding: 4px 18px;
 }
 
 .facts-row {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
   gap: 16px;
-  padding: 12px 0;
+  padding: 14px 0;
 }
 
 .facts-row + .facts-row {
@@ -760,7 +880,7 @@ textarea {
 .facts dl {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 10px 18px;
+  gap: 12px 20px;
   margin: 0;
 }
 
@@ -770,7 +890,7 @@ textarea {
 }
 
 .fact dd {
-  margin: 2px 0 0;
+  margin: 3px 0 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -800,7 +920,7 @@ textarea {
 }
 
 .fact-error {
-  color: #ffb9bf;
+  color: var(--red);
   font-size: 11.5px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -811,8 +931,8 @@ textarea {
   margin-top: 8px;
   padding: 6px 8px;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  color: #ffb9bf;
+  background: var(--red-soft);
+  color: var(--red);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -833,7 +953,7 @@ table {
 
 th,
 td {
-  padding: 7px 8px;
+  padding: 8px;
   text-align: left;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
@@ -844,6 +964,10 @@ th {
   color: var(--muted);
   font-weight: 500;
   font-size: 12px;
+}
+
+tbody tr:hover td {
+  background: var(--bg-alt);
 }
 
 tbody tr:last-child td {
@@ -860,10 +984,15 @@ tbody tr:last-child td {
   font-family: var(--sans);
 }
 
+tbody tr:hover td.empty {
+  background: none;
+}
+
 /* ============ Settings drawer ============ */
 
 .drawer {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
 }
 
 .drawer label {
@@ -877,7 +1006,7 @@ tbody tr:last-child td {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 /* ============ Footer ============ */
@@ -887,7 +1016,9 @@ tbody tr:last-child td {
   flex-wrap: wrap;
   gap: 6px 16px;
   align-items: center;
-  margin-top: 18px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 12px;
 }
@@ -898,20 +1029,27 @@ tbody tr:last-child td {
 }
 
 .footer .pulse b {
-  color: var(--indigo);
+  color: var(--blue);
 }
 
 /* ============ Small screens ============ */
 
 @media (max-width: 560px) {
   .app {
-    padding: 10px 14px 28px;
+    padding: 16px 16px 28px;
+  }
+  .topbar-row {
+    padding: 0 16px;
+  }
+  .crumb,
+  .name {
+    display: none;
   }
   .leash {
-    padding: 16px 16px 14px;
+    padding: 18px 16px 14px;
   }
   .leash-spent-num {
-    font-size: 34px;
+    font-size: 36px;
   }
   .leash-expiry {
     align-items: flex-start;

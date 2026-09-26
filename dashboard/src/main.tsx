@@ -18,7 +18,6 @@ if (isDashboard) {
     ),
   );
 } else {
-  document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", "light");
   Promise.all([import("./landing/Landing"), import("./landing/landing.css")]).then(
     ([{ Landing }]) =>
       root.render(

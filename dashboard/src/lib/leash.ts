@@ -224,7 +224,12 @@ export function spentFraction(cap: bigint | null, spent: bigint | null): number 
 // ============ Formatting ============
 
 /// Human readable 18 decimal amount: thousands separators, at most `maxFrac` fraction digits, trailing zeros trimmed.
+/// A non zero amount below the last shown digit reads "<0.0001", never "0".
 export function formatAmount(raw: bigint, decimals = 18, maxFrac = 4): string {
+  const unit = 10n ** BigInt(Math.max(decimals - maxFrac, 0));
+  if (raw !== 0n && (raw < 0n ? -raw : raw) < unit) {
+    return `${raw < 0n ? "-" : ""}<0.${"0".repeat(Math.max(maxFrac - 1, 0))}1`;
+  }
   const s = formatUnits(raw, decimals);
   const [int, frac = ""] = s.split(".");
   const negative = int.startsWith("-");
