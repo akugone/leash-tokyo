@@ -230,7 +230,7 @@ function Problems() {
     { icon: "chart", title: "Slippage bounds", body: "Cap the price impact of every swap with leash.maxSlippageBps. A looser price limit reverts with SlippageTooLoose." },
     { icon: "clock", title: "Time boxed mandates", body: "Give a subname an expiry. The mandate lapses on its own, no one has to remember." },
     { icon: "user", title: "Split duties", body: "A risk manager edits the limits, never the identity. Only the owner can issue or revoke." },
-    { icon: "key", title: "Its own resolver", body: "Each agent gets its own ENSv2 Permissioned Resolver. Its records live there alone, and a role granted on it covers that agent only." },
+    { icon: "key", title: "Its own resolver", body: "Each agent gets its own ENSv2 Permissioned Resolver. Its records live there alone, and a role granted on it covers that agent only: no role, and ENS refuses the write." },
     { icon: "scissors", title: "Instant kill switch", body: "Cut the leash: unregister the subname and the next swap reverts with LeashRevoked." },
     { icon: "signature", title: "Router agnostic", body: "The agent signs an EIP-712 intent, so any Uniswap v4 router works. No bespoke frontend." },
   ];
@@ -468,6 +468,7 @@ function GetStarted() {
             <p><b>Try it.</b> Ask the agent to <code>buy 25 lUSD of lETH</code>: the swap settles and the leash bar moves.</p>
             <p>Ask for <code>300 lUSD</code>: the hook answers <code>DailyCapExceeded</code>, nothing moves.</p>
             <p>As risk manager, tighten the cap. Try to revoke: <code>EACUnauthorizedAccountRoles</code>.</p>
+            <p>As owner, issue <code>trader-2</code> without ticking <b>Give the risk manager its role</b>. The risk manager can still tighten <code>trader-1</code>, but on <code>trader-2</code> the dashboard simulates first and shows ENS refusing, <code>EACUnauthorizedAccountRoles</code>: nothing is sent.</p>
             <p>As owner, cut the leash. The next trade reverts with <code>LeashRevoked</code>.</p>
             <div className="lp-cta">
               <a className="lp-btn lp-btn-dark" href={DASHBOARD}>Open the dashboard</a>
