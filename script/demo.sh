@@ -11,6 +11,7 @@
 #   script/demo.sh cut       # act 5: owner cuts the leash
 #   script/demo.sh short     # bonus: issue trader-2 with a 3 minute expiry
 #   script/demo.sh agent     # open Claude Code as the trading agent (MCP tools leash_policy, leash_swap)
+#                            #   LEASH_RECORD_REFUSALS=1: send refused swaps anyway, recorded on chain (agent pays gas)
 #   script/demo.sh dashboard # dashboard dev server for this network, with the demo controls and the feed
 #   script/demo.sh status    # print the deployment record
 #

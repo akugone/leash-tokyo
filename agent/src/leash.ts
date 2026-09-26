@@ -66,7 +66,8 @@ export type SwapResult =
       slippageBps: bigint | null;
       quote: LeashState["quote"];
     }
-  | { status: "revert"; reason: string; amount: bigint };
+  /** `txHash` is set when the refusal was recorded on chain through `LeashVault.trySwap`. */
+  | { status: "revert"; reason: string; amount: bigint; txHash?: Hex };
 
 export class LeashError extends Error {
   constructor(
@@ -90,6 +91,7 @@ export class LeashClient {
   readonly walletClient;
   private readonly feedUrl: string | null;
   private readonly onEvent?: (e: AgentEvent) => void;
+  private readonly recordRefusals: boolean;
   /** Swaps run one at a time: two intents signed with the same nonce would make the second one BadNonce. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -97,7 +99,12 @@ export class LeashClient {
     readonly deployments: Deployments,
     rpcUrl: string,
     agentPk: Hex,
-    opts: { feedUrl?: string | null; onEvent?: (e: AgentEvent) => void } = {},
+    opts: {
+      feedUrl?: string | null;
+      onEvent?: (e: AgentEvent) => void;
+      /** Send a refused swap anyway, through `trySwap`, so the refusal is recorded on chain. Costs the agent gas. */
+      recordRefusals?: boolean;
+    } = {},
   ) {
     const chainId = Number(deployments.chainId);
     const chain = chainId === sepolia.id ? sepolia : defineChain({ ...sepolia, id: chainId, name: `chain-${chainId}` });
@@ -106,6 +113,7 @@ export class LeashClient {
     this.walletClient = createWalletClient({ account: this.account, chain, transport: http(rpcUrl) });
     this.feedUrl = opts.feedUrl ?? null;
     this.onEvent = opts.onEvent;
+    this.recordRefusals = opts.recordRefusals ?? false;
   }
 
   fullName(label = this.deployments.agentLabel): string {
@@ -233,8 +241,17 @@ export class LeashClient {
         decimals: state.quote.decimals,
         symbol: state.quote.symbol,
       });
-      await this.emit({ kind: "revert", name: state.name, amount: amountText, text: `REVERT ${reason}` });
-      return { status: "revert", reason, amount };
+      const recorded = this.recordRefusals
+        ? await this.recordRefusal(vaultSwapArgs(deployments, intent, sqrtPriceLimitX96, hookData))
+        : null;
+      await this.emit({
+        kind: "revert",
+        name: state.name,
+        amount: amountText,
+        txHash: recorded ?? undefined,
+        text: recorded ? `REVERT ${reason}, recorded on chain ${recorded}` : `REVERT ${reason}`,
+      });
+      return { status: "revert", reason, amount, txHash: recorded ?? undefined };
     }
 
     const txHash = await this.walletClient.writeContract(request);
@@ -276,6 +293,29 @@ export class LeashClient {
       slippageBps,
       quote: state.quote,
     };
+  }
+
+  /**
+   * Send a swap the simulation refused through `LeashVault.trySwap`, so the hook's answer lands on chain as a
+   * `SwapRefused` event. Only when `trySwap` itself would record it: a vault level refusal (`NotSigner`,
+   * `NotLeashPool`) reverts there too, and is not sent. Returns the transaction hash, or null when not sent.
+   */
+  private async recordRefusal(args: ReturnType<typeof vaultSwapArgs>): Promise<Hex | null> {
+    try {
+      const { request, result } = await this.publicClient.simulateContract({
+        address: this.deployments.vault,
+        abi: LEASH_VAULT_ABI,
+        functionName: "trySwap",
+        args,
+        account: this.account,
+      });
+      if (result[0]) return null; // the swap would now go through: not a refusal anymore
+      const txHash = await this.walletClient.writeContract(request);
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+      return receipt.status === "success" ? txHash : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

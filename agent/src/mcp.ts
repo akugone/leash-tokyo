@@ -6,7 +6,8 @@
  *
  * Env (agent/.env then repo root .env): AGENT_PK, RPC_URL (default http://127.0.0.1:8545),
  * LEASH_DEPLOYMENTS_FILE (default deployments/anvil.json), LEASH_FEED_URL
- * (default http://localhost:5173/api/agent-events, set to "off" to disable).
+ * (default http://localhost:5173/api/agent-events, set to "off" to disable), LEASH_RECORD_REFUSALS ("1" sends a
+ * refused swap anyway through LeashVault.trySwap, so the refusal is on chain; the agent pays the gas).
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -34,6 +35,7 @@ const deployments = loadDeployments(resolveDeploymentsPath(process.env.LEASH_DEP
 const client = new LeashClient(deployments, rpcUrl, agentPk, {
   feedUrl: feedEnv === "off" ? null : feedEnv,
   onEvent: (e) => console.error(`[leash] ${e.kind} ${e.text}`),
+  recordRefusals: process.env.LEASH_RECORD_REFUSALS === "1",
 });
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
@@ -115,7 +117,8 @@ server.registerTool(
           `OK: swapped ${q(r.filled)}, tx ${r.txHash}, block ${r.block}, slippage ${bpsText(r.slippageBps)}.${fill} Spent today ${q(r.spentToday)} of cap ${q(r.cap)}.`,
         );
       }
-      return fail(`REVERT: ${r.reason}. Nothing moved.`);
+      const onChain = r.txHash ? ` The refusal is recorded on chain: tx ${r.txHash}.` : "";
+      return fail(`REVERT: ${r.reason}. Nothing moved.${onChain}`);
     } catch (err) {
       if (err instanceof LeashError) return fail(`REVERT: ${err.reason ?? err.message}. Nothing moved.`);
       return fail(`swap failed: ${err instanceof Error ? err.message : String(err)}`);
