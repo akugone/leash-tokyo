@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { shortHex } from "../lib/leash";
+import { shortHex, slippageInputError } from "../lib/leash";
 
 type Status = { enabled: boolean; riskManager: string | null; owner: string | null; name: string };
 
@@ -9,6 +9,7 @@ type Outcome = { tone: "ok" | "bad" | "info"; text: string } | null;
 export function Controls({ onChanged, revoked }: { onChanged: () => void; revoked: boolean }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [cap, setCap] = useState("10");
+  const [slippage, setSlippage] = useState("50");
   const [busy, setBusy] = useState<string | null>(null);
   const [riskOut, setRiskOut] = useState<Outcome>(null);
   const [ownerOut, setOwnerOut] = useState<Outcome>(null);
@@ -90,7 +91,7 @@ export function Controls({ onChanged, revoked }: { onChanged: () => void; revoke
           <button
             className="ghost"
             disabled={busy !== null}
-            title="Try unregister, setAddress and setText(leash.quote) as the risk manager. All three must revert."
+            title="Try unregister, setAddress, setText(leash.quote) and clearing leash.maxSlippageBps as the risk manager. All four must revert."
             onClick={() =>
               call("forbid", "/api/demo/forbid", {}, setRiskOut, (r) => {
                 const results = r.results as { ok: boolean; text: string }[];
@@ -118,8 +119,33 @@ export function Controls({ onChanged, revoked }: { onChanged: () => void; revoke
         </div>
         <p className="role-hint">
           Owns the parent name and the org registry. Revoking is one transaction, no key rotation.
+          The only one who can set <code>leash.maxSlippageBps</code>.
         </p>
         <div className="role-row">
+          <label className="field">
+            <span>max slippage</span>
+            <input
+              value={slippage}
+              onChange={(e) => setSlippage(e.target.value)}
+              inputMode="numeric"
+              size={6}
+              disabled={busy !== null || revoked}
+              title={slippageInputError(slippage) ?? `${Number(slippage) / 100}% of the pool price`}
+            />
+            <span className="unit">bps</span>
+          </label>
+          <button
+            className="btn"
+            disabled={busy !== null || revoked || slippageInputError(slippage) !== null}
+            onClick={() =>
+              call("slippage", "/api/demo/slippage", { bps: slippage }, setOwnerOut, (r) => ({
+                tone: r.status === "success" ? "ok" : "bad",
+                text: `Max slippage set to ${slippage} bps (${Number(slippage) / 100}%). Tx ${shortHex(String(r.txHash), 10, 6)}`,
+              }))
+            }
+          >
+            {busy === "slippage" ? "Sending…" : "Set slippage"}
+          </button>
           <button
             className="btn danger"
             disabled={busy !== null || revoked}
