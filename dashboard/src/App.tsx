@@ -14,7 +14,7 @@ import { StatusPill } from "./components/StatusPill";
 import { SwapTable } from "./components/SwapTable";
 import { nextAgentLabel } from "./lib/actions";
 import { chainNow, type ChainClock } from "./lib/chain";
-import { childNode, computeStatus, type LeashStatus } from "./lib/leash";
+import { childNode, computeStatus, LOCKED, type LeashStatus } from "./lib/leash";
 import { useActivity } from "./useActivity";
 import { useAgents } from "./useAgents";
 import { useDashboard } from "./useDashboard";
@@ -101,13 +101,15 @@ export function App() {
           </h1>
           <div className="header-right">
             {!creating && <StatusPill status={status} />}
-            <button
-              className="ghost"
-              onClick={() => setSettingsOpen((o) => !o)}
-              aria-expanded={settingsOpen}
-            >
-              Settings
-            </button>
+            {!LOCKED && (
+              <button
+                className="ghost"
+                onClick={() => setSettingsOpen((o) => !o)}
+                aria-expanded={settingsOpen}
+              >
+                Settings
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -116,9 +118,11 @@ export function App() {
         {dash.deploymentsError && (
           <div className="banner error">
             deployments: {dash.deploymentsError}
-            <button className="ghost" onClick={() => setSettingsOpen(true)}>
-              Paste JSON
-            </button>
+            {!LOCKED && (
+              <button className="ghost" onClick={() => setSettingsOpen(true)}>
+                Paste JSON
+              </button>
+            )}
           </div>
         )}
         {dash.pollError && <div className="banner error">rpc: {dash.pollError}</div>}
@@ -126,7 +130,7 @@ export function App() {
           <div className="banner">Connecting to {config.rpc}…</div>
         )}
 
-        {settingsOpen && (
+        {!LOCKED && settingsOpen && (
           <Settings
             config={config}
             source={dash.deploymentsSource}

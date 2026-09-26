@@ -101,6 +101,16 @@ describe("config", () => {
     expect(parseConfig(configToSearch(cfg))).toEqual(cfg);
     expect(configToSearch(parseConfig(""))).toBe("");
   });
+  test("locked build ignores rpc and deployments from the url", () => {
+    const cfg = parseConfig(
+      "?rpc=https%3A%2F%2Fevil.example&deployments=https%3A%2F%2Fevil.example%2Fd.json&label=trader-2",
+      undefined,
+      true,
+    );
+    expect(cfg.rpc).toBe("http://127.0.0.1:8545");
+    expect(cfg.deployments).toBe("/deployments.json");
+    expect(cfg.label).toBe("trader-2");
+  });
   test("parseDeployments requires the core keys", () => {
     expect(() => parseDeployments({ chainId: "1" })).toThrow('missing "parentName"');
     const d = parseDeployments({
