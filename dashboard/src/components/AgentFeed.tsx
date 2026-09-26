@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Hex } from "viem";
 import type { ActivityItem, ActivityKind } from "../lib/activity";
+import { CopyHex } from "./CopyHex";
 
 export type FeedEvent = {
   id: number;
@@ -189,13 +190,13 @@ function ChainList({ items, latest, now, node, txUrl }: ChainFeed) {
           <span className={`feed-src src-${sourceOf(i)}`}>{SOURCE_LABEL[sourceOf(i)]}</span>
           <span className="feed-text">
             {i.text}{" "}
-            {txUrl ? (
-              <a href={`${txUrl}${i.txHash}`} target="_blank" rel="noreferrer">
-                {shortenHashes(i.txHash)}
-              </a>
-            ) : (
-              shortenHashes(i.txHash)
-            )}
+            <CopyHex
+              value={i.txHash}
+              head={10}
+              tail={6}
+              what="hash"
+              href={txUrl ? `${txUrl}${i.txHash}` : undefined}
+            />
           </span>
         </li>
       ))}

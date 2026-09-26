@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { FUND_AMOUNT } from "../lib/actions";
 import type { VaultHolding } from "../lib/chain";
-import { formatAmount, shortHex, type Deployments } from "../lib/leash";
+import { formatAmount, type Deployments } from "../lib/leash";
 import { OutcomeLine } from "./RoleCards";
 import { errorText, useSigner, type Outcome } from "./signer";
+import { CopyHex } from "./CopyHex";
 
 type Props = {
   deployments: Deployments | null;
@@ -40,9 +41,7 @@ export function OrgBar({ deployments, holdings, onChanged }: Props) {
         {deployments.vault && (
           <span className="org-vault">
             <span className="org-label">org vault</span>
-            <span className="addr num" title={deployments.vault}>
-              {shortHex(deployments.vault, 6, 4)}
-            </span>
+            <CopyHex value={deployments.vault} />
             <span className="org-holdings num">
               {holdings
                 ? holdings.map((h) => `${formatAmount(h.balance)} ${h.symbol}`).join(" · ")

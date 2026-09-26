@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Snapshot } from "../lib/chain";
-import { shortHex, type Deployments } from "../lib/leash";
+import type { Deployments } from "../lib/leash";
+import { CopyHex } from "./CopyHex";
 
 type Props = {
   snapshot: Snapshot | null;
@@ -138,19 +139,7 @@ function Fact({
 
 function Addr({ value }: { value: string | null }) {
   if (!value) return <Pending />;
-  return (
-    <span className="addr num" title={value}>
-      {shortHex(value, 6, 4)}
-      <button
-        className="copy"
-        onClick={() => void navigator.clipboard?.writeText(value)}
-        title="Copy address"
-        aria-label="Copy address"
-      >
-        ⧉
-      </button>
-    </span>
-  );
+  return <CopyHex value={value} />;
 }
 
 function Pending() {

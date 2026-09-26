@@ -328,6 +328,18 @@ button.copy {
   font-size: 11px;
 }
 
+button.copy:hover {
+  color: var(--fg);
+}
+
+button.copy.copied {
+  color: var(--green);
+}
+
+.addr a {
+  color: inherit;
+}
+
 /* Primary action: the landing's dark button. */
 .btn {
   background: var(--fg);

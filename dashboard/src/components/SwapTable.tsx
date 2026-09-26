@@ -1,14 +1,18 @@
 import type { SwapRow } from "../lib/chain";
-import { formatAmount, shortHex } from "../lib/leash";
+import { formatAmount } from "../lib/leash";
+import { CopyHex } from "./CopyHex";
 
 export function SwapTable({
   swaps,
   error,
   scannedTo,
+  txUrl,
 }: {
   swaps: SwapRow[];
   error: string | null;
   scannedTo: bigint | null;
+  /// Explorer transaction URL prefix, none on a local fork.
+  txUrl?: string;
 }) {
   return (
     <section className="swaps">
@@ -40,8 +44,14 @@ export function SwapTable({
               swaps.map((s) => (
                 <tr key={`${s.txHash}:${s.logIndex}`}>
                   <td className="num">{s.blockNumber.toString()}</td>
-                  <td className="num" title={s.txHash}>
-                    {shortHex(s.txHash, 10, 6)}
+                  <td className="num">
+                    <CopyHex
+                      value={s.txHash}
+                      head={10}
+                      tail={6}
+                      what="hash"
+                      href={txUrl ? `${txUrl}${s.txHash}` : undefined}
+                    />
                   </td>
                   <td className="num right" title={s.notional.toString()}>
                     {formatAmount(s.notional)}
