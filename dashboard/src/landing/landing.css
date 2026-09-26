@@ -416,6 +416,87 @@ code {
   grid-template-columns: repeat(3, 1fr);
 }
 
+/* Inside the hook: beforeSwap -> swap -> afterSwap */
+.lp-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) auto minmax(0, 0.8fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 12px;
+  margin: 8px 0 32px;
+}
+
+.lp-flow-step {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid var(--lp-line);
+  border-radius: 10px;
+}
+
+.lp-flow-mid {
+  justify-content: center;
+  background: var(--lp-bg-alt);
+  border-style: dashed;
+}
+
+.lp-flow-step p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--lp-ink-2);
+}
+
+.lp-flow-tag {
+  align-self: flex-start;
+  background: var(--lp-ink);
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.lp-flow-arrow {
+  align-self: center;
+  color: var(--lp-muted);
+  font-size: 20px;
+}
+
+.lp-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lp-checks li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--lp-line);
+  font-size: 14px;
+}
+
+.lp-checks li:first-child {
+  border-top: 0;
+}
+
+.lp-checks code {
+  flex: none;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .lp-flow {
+    grid-template-columns: 1fr;
+  }
+  .lp-flow-arrow {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
+}
+
 /* A lone card on the last row sits in the middle column instead of hanging on the left. */
 @media (min-width: 901px) {
   .lp-grid-3 > :last-child:nth-child(3n + 1) {

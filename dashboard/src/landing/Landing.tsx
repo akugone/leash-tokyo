@@ -47,6 +47,7 @@ export function Landing() {
         <WhatAndWho />
         <Problems />
         <HowItWorks />
+        <InsideTheHook />
         <GetStarted />
         <Market />
         <Closing />
@@ -56,7 +57,7 @@ export function Landing() {
           <span className="lp-brand">
             <Logo className="lp-logo" /> Leash
           </span>
-          <span className="lp-muted">ENS-native permissions for autonomous traders.</span>
+          <span className="lp-muted">ENS holds the mandate. A Uniswap v4 hook enforces it.</span>
           <a href={REPO}>GitHub</a>
         </div>
       </footer>
@@ -76,6 +77,7 @@ function Nav() {
           <a href="#what">What</a>
           <a href="#use-cases">Use cases</a>
           <a href="#how">How it works</a>
+          <a href="#hook">Hook</a>
           <a href="#start">Get started</a>
           <a href="#market">Market</a>
         </nav>
@@ -187,10 +189,9 @@ function WhatAndWho() {
   return (
     <section className="lp-section">
       <div className="lp-wrap">
-        <SectionHead id="what" eyebrow="01 · What is Leash" title="An ENS name becomes your agent's trading licence.">
-          Leash is a Uniswap v4 hook that checks every swap against the agent's ENS subname and the
-          risk policy stored in its resolver. If the name is revoked, expired, or over its limits,
-          the swap reverts. No trusted router, no custody change.
+        <SectionHead id="what" eyebrow="01 · What is Leash" title="ENS holds the mandate. The hook enforces it.">
+          The agent's ENS subname carries its identity and limits. A Uniswap v4 hook checks them on
+          every swap, inside the pool. Revoked, expired or over the limit: the swap reverts.
         </SectionHead>
         <div className="lp-callout">
           <Icon name="link" />
@@ -268,9 +269,9 @@ function HowItWorks() {
   const steps: { n: string; title: string; body: string }[] = [
     { n: "1", title: "Own a namespace", body: "The org owns acme.eth and deploys its own ENSv2 Permissioned Registry." },
     { n: "2", title: "Issue the agent", body: "Register trader-1.acme.eth with an expiry. Its addr record is the agent's key." },
-    { n: "3", title: "Write the policy", body: "Text records in the Permissioned Resolver hold the quote token, daily cap and allowed tokens." },
+    { n: "3", title: "Write the policy", body: "Text records hold the quote token, daily cap, allowed tokens and max slippage." },
     { n: "4", title: "Sign and swap", body: "The agent signs a SwapIntent and passes it in hookData through any v4 router." },
-    { n: "5", title: "Hook enforces", body: "beforeSwap checks identity, nonce, deadline, tokens. afterSwap counts the quote delta against the cap." },
+    { n: "5", title: "Hook enforces", body: "Every swap is checked in the pool before and after it settles. See below." },
   ];
   const stack: { layer: string; role: string }[] = [
     { layer: "ENSv2 Permissioned Registry", role: "The org's namespace. Issues and revokes agent identities." },
@@ -283,10 +284,7 @@ function HowItWorks() {
   return (
     <section className="lp-section">
       <div className="lp-wrap">
-        <SectionHead id="how" eyebrow="03 · How it works" title="Identity in ENS. Enforcement in the pool.">
-          The policy is read live from the resolver on every swap. No cache, no staleness window, and
-          the parser fails closed on any malformed value.
-        </SectionHead>
+        <SectionHead id="how" eyebrow="03 · How it works" title="Identity in ENS. Enforcement in the pool." />
         <ol className="lp-steps">
           {steps.map((s) => (
             <li key={s.n}>
@@ -306,6 +304,7 @@ function HowItWorks() {
                 {"\nleash.quote          0x…lUSD"}
                 {"\nleash.dailyNotional  250000000"}
                 {"\nleash.tokens         0x…lETH,0x…lUSD"}
+                {"\nleash.maxSlippageBps 100"}
                 {"\nexpiry               2026-12-31"}
               </code>
             </pre>
@@ -327,6 +326,69 @@ function HowItWorks() {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/// The enforcement point, at a glance: what beforeSwap checks, what afterSwap counts, and why it holds.
+function InsideTheHook() {
+  const checks: { what: string; error: string }[] = [
+    { what: "Name is alive", error: "LeashRevoked" },
+    { what: "Signed by the addr record", error: "BadSignature" },
+    { what: "Fresh, used once", error: "BadNonce" },
+    { what: "Matches the swap", error: "IntentMismatch" },
+    { what: "Tokens allowed", error: "TokenNotAllowed" },
+    { what: "Price impact bounded", error: "SlippageTooLoose" },
+  ];
+  const traits: { t: string; d: string }[] = [
+    { t: "Live policy", d: "Read from the resolver on every swap. No cache." },
+    { t: "Fails closed", d: "A malformed record reverts the swap, never loosens it." },
+    { t: "No oracle", d: "The cap counts the settled delta, not a price feed." },
+  ];
+  return (
+    <section className="lp-section lp-alt">
+      <div className="lp-wrap">
+        <SectionHead id="hook" eyebrow="04 · Inside the hook" title="Every swap passes two checkpoints.">
+          The hook lives in the pool, so the check is part of the swap. No agent can route around it.
+        </SectionHead>
+        <div className="lp-flow">
+          <article className="lp-flow-step">
+            <code className="lp-flow-tag">beforeSwap</code>
+            <ul className="lp-checks">
+              {checks.map((c) => (
+                <li key={c.error}>
+                  <span>{c.what}</span>
+                  <code>{c.error}</code>
+                </li>
+              ))}
+            </ul>
+          </article>
+          <span className="lp-flow-arrow" aria-hidden="true">→</span>
+          <article className="lp-flow-step lp-flow-mid">
+            <code className="lp-flow-tag">swap</code>
+            <p>Uniswap v4 settles the trade, through any router.</p>
+          </article>
+          <span className="lp-flow-arrow" aria-hidden="true">→</span>
+          <article className="lp-flow-step">
+            <code className="lp-flow-tag">afterSwap</code>
+            <p>The real amount moved is added to today's spend.</p>
+            <ul className="lp-checks">
+              <li>
+                <span>Over the daily cap</span>
+                <code>DailyCapExceeded</code>
+              </li>
+            </ul>
+          </article>
+        </div>
+        <div className="lp-grid lp-grid-3">
+          {traits.map((t) => (
+            <article className="lp-card lp-card-plain" key={t.t}>
+              <h4>{t.t}</h4>
+              <p>{t.d}</p>
+            </article>
+          ))}
         </div>
       </div>
     </section>
@@ -366,9 +428,9 @@ function GetStarted() {
     },
   ];
   return (
-    <section className="lp-section lp-alt">
+    <section className="lp-section">
       <div className="lp-wrap">
-        <SectionHead id="start" eyebrow="04 · Get started" title="Three roles, one name.">
+        <SectionHead id="start" eyebrow="05 · Get started" title="Three roles, one name.">
           Each party gets exactly the authority it needs, enforced by ENS roles rather than by a
           promise in an ops doc.
         </SectionHead>
@@ -433,9 +495,9 @@ function Market() {
   const mark = (v: boolean | "partial") =>
     v === true ? <span className="lp-ok">✓</span> : v === "partial" ? <span className="lp-muted">~</span> : <span className="lp-ko">✕</span>;
   return (
-    <section className="lp-section">
+    <section className="lp-section lp-alt">
       <div className="lp-wrap">
-        <SectionHead id="market" eyebrow="05 · Where it fits" title="The missing permission layer for onchain agents.">
+        <SectionHead id="market" eyebrow="06 · Where it fits" title="The missing permission layer for onchain agents.">
           Autonomous agents are starting to trade real money. Today's options either trust the bot
           with everything, or move custody somewhere else. Leash sits in between: identity and limits
           in ENS, enforcement in the pool.
