@@ -453,7 +453,7 @@ function GetStarted() {
             <code>
               <span className="lp-c">{"# anvil fork of Sepolia, real ENSv2 + Uniswap v4"}</span>
               {"\nscript/demo.sh anvil"}
-              <span className="lp-c">{"\n\n# register leashdemo.eth, deploy registry, resolver,\n# hook and pool, issue trader-1 with its policy"}</span>
+              <span className="lp-c">{"\n\n# register leash.eth, deploy registry, resolver,\n# hook and pool, issue trader-1 with its policy"}</span>
               {"\nscript/demo.sh setup"}
               <span className="lp-c">{"\n\n# dashboard on http://localhost:5173/app"}</span>
               {"\ncd dashboard && bun run dev"}

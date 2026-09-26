@@ -23,7 +23,7 @@ cd dashboard && bun run dev
 script/demo.sh agent
 ```
 
-`setup` funds the three demo keys, registers `leashdemo.eth` through the ENS commit/reveal registrar (paid in the testnet MockUSDC), deploys the org registry and resolver through ENS `VerifiableFactory`, deploys `LeashHook` at a mined CREATE2 address, creates the `lUSD/lETH` pool with the hook, seeds liquidity, deploys the org `LeashVault` and funds it with 100k of each token (the agent holds none), issues `trader-1.leashdemo.eth` with its policy and grants the risk-manager its two scoped roles. It ends by printing `deployments/anvil.json`.
+`setup` funds the three demo keys, registers `leash.eth` through the ENS commit/reveal registrar (paid in the testnet MockUSDC), deploys the org registry and resolver through ENS `VerifiableFactory`, deploys `LeashHook` at a mined CREATE2 address, creates the `lUSD/lETH` pool with the hook, seeds liquidity, deploys the org `LeashVault` and funds it with 100k of each token (the agent holds none), issues `trader-1.leash.eth` with its policy and grants the risk-manager its two scoped roles. It ends by printing `deployments/anvil.json`.
 
 `agent` opens Claude Code with `agent/mcp.json` (the Leash MCP server, `agent/src/mcp.ts`) and the persona in `agent/prompt.md`. Claude has exactly two tools, `leash_policy` and `leash_swap`, both signed with `AGENT_PK`. Every tool call is mirrored to the dashboard's activity feed.
 
@@ -31,7 +31,7 @@ Keys: `.env` holds three fresh keys (`cast wallet new`). Never use anvil's defau
 
 ## Act 1: identity (30 s)
 
-Dashboard: `trader-1.leashdemo.eth`, status LIVE, expiry countdown (7 days), agent address, cap 250 lUSD, allowed tokens, hook, org vault with its balances, and registry addresses. Two role cards on the right: risk-manager and owner.
+Dashboard: `trader-1.leash.eth`, status LIVE, expiry countdown (7 days), agent address, cap 250 lUSD, allowed tokens, hook, org vault with its balances, and registry addresses. Two role cards on the right: risk-manager and owner.
 
 Agent terminal, ask: `what is your mandate?` Claude calls `leash_policy` and answers with the cap, spent, remaining, tokens and expiry.
 
@@ -59,7 +59,7 @@ Observed:
 Sell 300 lUSD → lETH: REVERT DailyCapExceeded (would reach 325 of 250 lUSD cap). Nothing moved.
 ```
 
-Feed: `signed SwapIntent: 300 lUSD …` then `REVERT DailyCapExceeded: trader-1.leashdemo.eth would reach 325 lUSD of cap 250 lUSD today`. The agent did try: the prompt tells it never to clamp an order. The revert comes from `afterSwap`, measured on the real settlement delta.
+Feed: `signed SwapIntent: 300 lUSD …` then `REVERT DailyCapExceeded: trader-1.leash.eth would reach 325 lUSD of cap 250 lUSD today`. The agent did try: the prompt tells it never to clamp an order. The revert comes from `afterSwap`, measured on the real settlement delta.
 
 Say: we do not trust the agent's prompt, we trust the hook.
 
@@ -95,9 +95,9 @@ Say: tightening limits at 3am and killing an agent are two different powers, and
 
 Dashboard, owner card: click **cut the leash**. One transaction, `unregister(labelId)` on the org registry.
 
-Feed: `owner cuts trader-1.leashdemo.eth: unregister(labelId)`, `leash cut block …`. Status flips to REVOKED, the bar turns red, owner card reads `burned (unregistered)`, resolver `0x0`.
+Feed: `owner cuts trader-1.leash.eth: unregister(labelId)`, `leash cut block …`. Status flips to REVOKED, the bar turns red, owner card reads `burned (unregistered)`, resolver `0x0`.
 
-Agent terminal: `buy 5 lUSD of lETH`. Claude's `leash_policy` comes back `LeashRevoked: trader-1.leashdemo.eth was cut at …`; if it tries the swap anyway, the PoolManager reverts with `LeashRevoked` from `beforeSwap`.
+Agent terminal: `buy 5 lUSD of lETH`. Claude's `leash_policy` comes back `LeashRevoked: trader-1.leash.eth was cut at …`; if it tries the swap anyway, the PoolManager reverts with `LeashRevoked` from `beforeSwap`.
 
 Say: no key rotation, no redeploy. The agent still holds its key. The key is worth nothing.
 
@@ -120,10 +120,10 @@ The dashboard controls call the same contracts as `tighten`, `forbid` and `cut` 
 ## Bonus: a mandate that lapses on its own (if time remains)
 
 ```bash
-script/demo.sh short                 # issues trader-2.leashdemo.eth with a 3 minute expiry
+script/demo.sh short                 # issues trader-2.leash.eth with a 3 minute expiry
 bun run src/bot.ts --once --label trader-2      # OK, 25 lUSD
 # three minutes later (on anvil: cast rpc evm_increaseTime 181 && cast rpc evm_mine)
-bun run src/bot.ts --once --label trader-2      # LeashRevoked: trader-2.leashdemo.eth was cut at <expiry>
+bun run src/bot.ts --once --label trader-2      # LeashRevoked: trader-2.leash.eth was cut at <expiry>
 ```
 
 ## Record the demo as a video
@@ -150,7 +150,7 @@ cd dashboard && bun run record-demo
 
 ## Reset between rehearsals
 
-Restart `script/demo.sh anvil` (it deletes `deployments/anvil.json`) and run `setup` again: it copies the record to the dashboard and clears the activity feed (kept in the dev server's memory), then reload the page. Each run registers the same `leashdemo` label on a fresh fork.
+Restart `script/demo.sh anvil` (it deletes `deployments/anvil.json`) and run `setup` again: it copies the record to the dashboard and clears the activity feed (kept in the dev server's memory), then reload the page. Each run registers the same `leash` label on a fresh fork.
 
 ## Sepolia run
 
