@@ -38,7 +38,7 @@ repo root.
 `scripts/demo-server.ts` is a Vite plugin active under `bun run dev`. It keeps an in-memory activity feed
 (`/api/agent-events`, fed by the agent's MCP server) and performs the two human actions of the demo with the
 keys from the repo root `.env`: `/api/demo/tighten` (risk-manager, `setText(leash.dailyNotional)`),
-`/api/demo/forbid` (risk-manager tries to revoke, must revert) and `/api/demo/cut` (owner, `unregister`).
+`/api/demo/forbid` (risk-manager tries to revoke, must revert) `/api/demo/cut` (owner, `unregister`), `/api/demo/fund` (owner, mints test tokens to the org vault) and `/api/demo/issue` (owner, `register` a new or expired agent subname, then write its whole policy in one resolver `multicall`).
 Keys never reach the browser. The static build has no plugin: the feed shows offline and the controls hide.
 
 ## URL parameters

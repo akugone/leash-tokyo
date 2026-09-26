@@ -154,6 +154,8 @@ export type Deployments = {
   agent?: Address;
   agentLabel?: string;
   orgRegistry: Address;
+  /// Block the org registry was deployed at: where the agent list starts scanning.
+  orgRegistryBlock?: string;
   orgResolver?: Address;
   hook: Address;
   /// `LeashVault` holding the org's tokens, absent on deployments made before the vault.

@@ -853,6 +853,48 @@ textarea {
   text-align: right;
 }
 
+.field select {
+  height: 34px;
+  margin: 0;
+  padding: 0 8px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* New agent: the owner issues a subname with its own policy. */
+.role.issue {
+  border-left-color: var(--green);
+}
+
+.issue-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.issue-fields .field {
+  min-width: 0;
+}
+
+.issue-fields .field:has(.wide) {
+  grid-column: 1 / -1;
+}
+
+.issue-fields .field input:not(.wide) {
+  width: 4.5em;
+}
+
+.field input.wide {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  text-align: left;
+}
+
 .field .unit {
   color: var(--fg-2);
 }
@@ -1099,4 +1141,148 @@ tbody tr:hover td.empty {
   .feed-src {
     display: none;
   }
+}
+
+/* ============ Org bar and agent tabs ============ */
+
+.org-bar {
+  margin: 0 0 12px;
+}
+
+.org-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.org-name {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.org-vault {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.org-label {
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.org-holdings {
+  color: var(--fg-2);
+}
+
+.org-hint {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.org-bar .outcome {
+  margin-top: 8px;
+}
+
+.agent-tabs {
+  margin: 0 0 16px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.agent-tabs-row {
+  display: flex;
+  gap: 4px;
+  min-width: max-content;
+}
+
+.agent-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 -1px;
+  padding: 9px 14px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--r-control) var(--r-control) 0 0;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+.agent-tab:hover {
+  background: var(--bg-alt);
+}
+
+.agent-tab:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
+.agent-tab.selected {
+  border-color: var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.agent-tab-name {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.agent-tab-status {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent-tab.tone-live .agent-tab-status {
+  color: var(--green);
+}
+
+.agent-tab.tone-expiring .agent-tab-status {
+  color: var(--amber);
+}
+
+.agent-tab.tone-unknown .agent-tab-status {
+  color: var(--muted);
+}
+
+/* Cut or expired: still openable, to show it and to issue it again. */
+.agent-tab.tone-revoked {
+  color: var(--muted);
+}
+
+.agent-tab.tone-revoked .agent-tab-name {
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+
+.agent-tab.tone-revoked .agent-tab-status {
+  color: var(--red);
+  opacity: 0.8;
+}
+
+.agent-tab.new {
+  color: var(--blue);
+  font-weight: 500;
+}
+
+.issue-page {
+  max-width: 720px;
+  margin: 0 0 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--panel);
+  overflow: hidden;
 }

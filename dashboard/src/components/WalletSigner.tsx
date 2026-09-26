@@ -1,34 +1,42 @@
-// Wallet mode of the role cards: the owner and the risk manager sign from their own wallet through Reown
-// AppKit. Loaded lazily, only when there is no dev server and a Reown project id is set.
+// Wallet mode of the signer: the owner and the risk manager sign from their own wallet through Reown AppKit.
+// Loaded lazily, only when there is no dev server and a Reown project id is set.
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { OptionsController } from "@reown/appkit-controllers";
 import { sepolia as sepoliaNetwork } from "@reown/appkit/networks";
 import { createAppKit, useAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
-import { http, type Address } from "viem";
+import { useState, type ReactNode } from "react";
+import { http, type Abi, type Address } from "viem";
 import { sepolia } from "viem/chains";
 import { WagmiProvider, useAccount, usePublicClient, useSwitchChain, useWalletClient } from "wagmi";
 import {
   cutCall,
+  fundCalls,
+  FUND_AMOUNT,
+  issueCalls,
+  registryWriteAbi,
   forbiddenCalls,
   forbiddenOutcome,
   slippageCall,
   tightenCall,
   type LeashTarget,
 } from "../lib/actions";
-import { shortHex, type Deployments } from "../lib/leash";
-import { RoleCards, type RoleActions, type RoleGate } from "./Controls";
-
-const TX_URL = "https://sepolia.etherscan.io/tx/";
+import { labelId, shortHex, type Deployments } from "../lib/leash";
+import {
+  SEPOLIA_TX_URL,
+  SignerValue,
+  issuedOutcome,
+  ttlSeconds,
+  type RoleActions,
+  type RoleGate,
+} from "./signer";
 
 type Props = {
   projectId: string;
   rpc: string;
   deployments: Deployments;
   label: string;
-  revoked: boolean;
-  onChanged: () => void;
+  children: ReactNode;
 };
 
 let setup: { adapter: WagmiAdapter; queryClient: QueryClient } | null = null;
@@ -76,10 +84,7 @@ function appKit(projectId: string, rpc: string) {
   return setup;
 }
 
-export default function WalletControls(props: Props) {
-  // The wallet path signs Sepolia transactions only; a local anvil record has the dev server instead.
-  if (Number(props.deployments.chainId) !== sepolia.id || !props.deployments.orgResolver)
-    return null;
+export default function WalletSigner(props: Props) {
   const { adapter, queryClient } = appKit(props.projectId, props.rpc);
   return (
     <WagmiProvider config={adapter.wagmiConfig}>
@@ -90,7 +95,7 @@ export default function WalletControls(props: Props) {
   );
 }
 
-function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
+function WalletRoles({ deployments, label, children }: Props) {
   const { address, isConnected, chainId } = useAccount();
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient({ chainId: sepolia.id });
@@ -136,12 +141,11 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
     return { canSign: true };
   };
 
-  type Call =
-    ReturnType<typeof tightenCall> | ReturnType<typeof slippageCall> | ReturnType<typeof cutCall>;
+  type Call = { address: Address; abi: Abi; functionName: string; args: readonly unknown[] };
   const send = async (call: Call) => {
     if (!walletClient || !address || !publicClient) throw new Error("Connect a wallet first.");
     if (chainId !== sepolia.id) await switchChainAsync({ chainId: sepolia.id });
-    // The union of three typed calls is too wide for viem's inference, each one is valid on its own.
+    // Each builder in lib/actions returns a fully typed call; the common shape is too wide for viem's inference.
     const hash = await walletClient.writeContract({
       ...call,
       account: address,
@@ -199,6 +203,63 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
         txHash: r.hash,
       };
     },
+    issue: async (form) => {
+      if (!publicClient || !owner) throw new Error("No owner in the deployment record.");
+      const block = await publicClient.getBlock();
+      const expiry = await publicClient.readContract({
+        address: deployments.orgRegistry,
+        abi: registryWriteAbi,
+        functionName: "getExpiry",
+        args: [labelId(form.label)],
+      });
+      if (expiry > block.timestamp) {
+        throw new Error(
+          `${form.label}.${deployments.parentName} is already live. Cut it first, or pick another name.`,
+        );
+      }
+      const calls = issueCalls(
+        {
+          parentName: deployments.parentName,
+          registry: deployments.orgRegistry,
+          resolver: target.resolver,
+        },
+        {
+          label: form.label,
+          agent: form.agent as Address,
+          owner: owner as Address,
+          quote: deployments.quote as Address,
+          tokens: [deployments.token0, deployments.token1] as Address[],
+          capHuman: form.cap,
+          maxSlippageBps: form.bps,
+          ttlSeconds: ttlSeconds(form),
+        },
+        block.timestamp,
+      );
+      const registered = await send(calls.register);
+      if (!registered.ok)
+        return { tone: "bad", text: "register reverted on chain.", txHash: registered.hash };
+      const written = await send(calls.policy);
+      if (!written.ok)
+        return { tone: "bad", text: "Policy write reverted on chain.", txHash: written.hash };
+      return issuedOutcome(form, deployments.parentName, calls.expiry, written.hash);
+    },
+    fund: async () => {
+      if (!deployments.vault) throw new Error("No vault in the deployment record.");
+      let last = "";
+      for (const call of fundCalls(deployments.vault, [
+        deployments.token0,
+        deployments.token1,
+      ] as Address[])) {
+        const r = await send(call);
+        last = r.hash;
+        if (!r.ok) return { tone: "bad", text: "mint reverted on chain.", txHash: r.hash };
+      }
+      return {
+        tone: "ok",
+        text: `Vault funded with ${FUND_AMOUNT} lUSD and ${FUND_AMOUNT} lETH (test tokens).`,
+        txHash: last,
+      };
+    },
   };
 
   const header = (
@@ -234,16 +295,18 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
   );
 
   return (
-    <RoleCards
-      actions={actions}
-      riskManager={riskManager}
-      owner={owner}
-      riskGate={gate("risk manager", riskManager)}
-      ownerGate={gate("owner", owner)}
-      revoked={revoked}
-      onChanged={onChanged}
-      header={header}
-      txUrl={TX_URL}
-    />
+    <SignerValue
+      value={{
+        actions,
+        riskGate: gate("risk manager", riskManager),
+        ownerGate: gate("owner", owner),
+        riskManager,
+        owner,
+        walletBar: header,
+        txUrl: SEPOLIA_TX_URL,
+      }}
+    >
+      {children}
+    </SignerValue>
   );
 }

@@ -41,17 +41,26 @@ const fail = (t: string) => ({ ...text(t), isError: true });
 
 const server = new McpServer({ name: "leash", version: "0.1.0" });
 
+/// Another subname of the same org, e.g. `trader-2` issued from the dashboard. Omitted: the deployment's agent.
+const labelSchema = z
+  .string()
+  .regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/, "one lowercase DNS label, e.g. trader-2")
+  .optional()
+  .describe(
+    `Subname label under ${deployments.parentName} to act as, e.g. "trader-2". Omit to use ${deployments.agentLabel}.`,
+  );
+
 server.registerTool(
   "leash_policy",
   {
     title: "Read the Leash policy",
     description:
-      "Read the trading mandate the Leash hook enforces for this agent's ENS name: daily cap, spent today, remaining today, max slippage, allowed tokens, expiry, nonce. Call it before trading and whenever the operator asks about limits.",
-    inputSchema: {},
+      "Read the trading mandate the Leash hook enforces for this agent's ENS name: daily cap, spent today, remaining today, max slippage, allowed tokens, expiry, nonce. Call it before trading and whenever the operator asks about limits. Pass `label` to read another name of the org.",
+    inputSchema: { label: labelSchema },
   },
-  async () => {
+  async ({ label }) => {
     try {
-      const s = await client.readState();
+      const s = await client.readState(label);
       const d = s.quote.decimals;
       const lines = [
         `name: ${s.name}`,
@@ -90,11 +99,12 @@ server.registerTool(
         .nonnegative()
         .optional()
         .describe("Max price move in basis points (100 = 1%). Omit to use the policy maximum."),
+      label: labelSchema,
     },
   },
-  async ({ amount, slippageBps }) => {
+  async ({ amount, slippageBps, label }) => {
     try {
-      const r = await client.swap(amount, undefined, slippageBps === undefined ? undefined : BigInt(slippageBps));
+      const r = await client.swap(amount, label, slippageBps === undefined ? undefined : BigInt(slippageBps));
       if (r.status === "ok") {
         const q = (v: bigint) => `${formatUnits(v, r.quote.decimals)} ${r.quote.symbol}`;
         const fill =

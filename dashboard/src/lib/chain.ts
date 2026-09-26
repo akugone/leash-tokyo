@@ -6,6 +6,7 @@ import {
   createPublicClient,
   erc20Abi,
   http,
+  parseAbiItem,
   type Address,
   type Hex,
   type PublicClient,
@@ -289,6 +290,59 @@ async function fetchVault(
       ]);
       return { token, symbol, balance };
     }),
+  );
+}
+
+// ============ Agents of the org ============
+
+/// Emitted by the org registry on every `register`, with the label in clear.
+export const labelRegisteredEvent = parseAbiItem(
+  "event LabelRegistered(uint256 indexed tokenId, bytes32 indexed labelHash, string label, address owner, uint64 expiry, address indexed sender)",
+);
+
+/// Public RPCs accept wide log ranges when the query is filtered on one address: 50k blocks is about a week.
+export const AGENT_LOG_CHUNK = 50_000n;
+
+/// Labels registered in `[from, to]`, first registration order, no duplicates (a re-issued name appears once).
+export async function fetchAgentLabels(
+  client: PublicClient,
+  registry: Address,
+  from: bigint,
+  to: bigint,
+): Promise<string[]> {
+  const labels: string[] = [];
+  for (const range of blockRanges(from, to, AGENT_LOG_CHUNK)) {
+    const logs = await client.getLogs({
+      address: registry,
+      event: labelRegisteredEvent,
+      fromBlock: range.from,
+      toBlock: range.to,
+    });
+    for (const log of logs) {
+      const label = log.args.label;
+      if (label && !labels.includes(label)) labels.push(label);
+    }
+  }
+  return labels;
+}
+
+/// Current expiry of each label, read in one multicall. Zero once cut.
+export async function fetchExpiries(
+  client: PublicClient,
+  registry: Address,
+  labels: readonly string[],
+): Promise<bigint[]> {
+  return Promise.all(
+    labels.map((label) =>
+      client
+        .readContract({
+          address: registry,
+          abi: registryAbi,
+          functionName: "getExpiry",
+          args: [labelId(label)],
+        })
+        .then(BigInt),
+    ),
   );
 }
 

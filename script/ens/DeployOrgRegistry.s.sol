@@ -37,6 +37,8 @@ contract DeployOrgRegistry is EnsScriptBase {
             "DeployOrgRegistry: owner missing root roles"
         );
         _writeAddress("orgRegistry", proxy);
+        // Lower bound for scanning the registry's events (the dashboard lists agents from `LabelRegistered`).
+        _writeUint("orgRegistryBlock", block.number);
 
         _logAddress("DeployOrgRegistry: orgRegistry", proxy);
         console2.log("DeployOrgRegistry: subregistry of", _parentName());
