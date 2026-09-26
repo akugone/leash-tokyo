@@ -485,7 +485,14 @@ function GetStarted() {
 }
 
 function Market() {
-  const cols = ["Hot key in a bot", "Multisig + modules", "Session keys", "Custodial policy engine", "Leash"];
+  // Categories, not products: the examples only show what each column stands for.
+  const cols: { name: string; eg: string }[] = [
+    { name: "Hot key in a bot", eg: "a bot with an EOA" },
+    { name: "Multisig + modules", eg: "e.g. Safe + Zodiac Roles" },
+    { name: "Session keys", eg: "e.g. MetaMask delegations" },
+    { name: "Custodial policy engine", eg: "e.g. Fireblocks, Copper" },
+    { name: "Leash", eg: "ENSv2 + Uniswap v4" },
+  ];
   const rows: { label: string; v: (boolean | "partial")[] }[] = [
     { label: "Enforced onchain, at the venue", v: [false, "partial", "partial", false, true] },
     { label: "Agent keeps its own key", v: [true, false, true, false, true] },
@@ -515,7 +522,10 @@ function Market() {
               <tr>
                 <th />
                 {cols.map((c) => (
-                  <th key={c} className={c === "Leash" ? "lp-hl" : undefined}>{c}</th>
+                  <th key={c.name} className={c.name === "Leash" ? "lp-hl" : undefined}>
+                    {c.name}
+                    <small className="lp-col-eg">{c.eg}</small>
+                  </th>
                 ))}
               </tr>
             </thead>
