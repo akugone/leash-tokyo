@@ -15,6 +15,7 @@ Every value is a JSON string. Keys:
 | `orgOwner`, `riskManager`, `agent` | the three demo addresses |
 | `agentLabel` | subname label, e.g. `trader-1` |
 | `orgRegistry` | the org `UserRegistry` proxy deployed through `VerifiableFactory` |
+| `orgRegistryBlock` | block the org registry was deployed at, where the dashboard starts scanning `LabelRegistered` to list agents |
 | `orgResolver` | the org `PermissionedResolver` proxy |
 | `hook` | the `LeashHook` |
 | `token0`, `token1`, `quote` | pool currencies, `quote` is one of the two |
