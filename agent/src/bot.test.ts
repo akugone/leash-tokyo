@@ -190,8 +190,12 @@ describe("bot", () => {
     expect(parseCliArgs([]).slippageBps).toBeUndefined();
   });
 
-  test("chooseSlippage: request, else policy, never clamped", () => {
-    expect(chooseSlippage(undefined, 100n)).toBe(100n);
+  test("chooseSlippage: request, else 90% of the policy, never clamped", () => {
+    expect(chooseSlippage(undefined, 100n)).toBe(90n);
+    expect(chooseSlippage(undefined, 5n)).toBe(4n);
+    // too small for headroom: the bound itself
+    expect(chooseSlippage(undefined, 1n)).toBe(1n);
+    expect(chooseSlippage(undefined, 0n)).toBe(0n);
     expect(chooseSlippage(30n, 100n)).toBe(30n);
     // wider than the policy goes out as is: the hook answers SlippageTooLoose
     expect(chooseSlippage(500n, 100n)).toBe(500n);

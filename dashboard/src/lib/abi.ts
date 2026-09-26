@@ -14,6 +14,7 @@ export const hookAbi = parseAbi([
   "error LeashRevoked(bytes32 node, uint64 expiry)",
   "error NoResolver(bytes32 node)",
   "error NoAgent(bytes32 node)",
+  "error InvalidRecord(string key)",
 ]);
 
 export const registryAbi = parseAbi([

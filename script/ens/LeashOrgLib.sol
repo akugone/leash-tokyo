@@ -91,7 +91,8 @@ library LeashOrgLib {
         calls[3] = abi.encodeCall(IPermissionedResolver.setText, (dnsName, KEY_TOKENS, tokenListString(tokens)));
     }
 
-    /// @notice Same as `policyCalls` plus `leash.maxSlippageBps`, the widest price move a swap may allow.
+    /// @notice Same as `policyCalls` plus `leash.maxSlippageBps`, the maximum price impact of one swap. Owner-only:
+    ///         an empty value switches the bound off, so the risk manager gets no role on this key.
     /// @param maxSlippageBps Basis points of the pool price, below 10000, written as a decimal string.
     function policyCalls(
         bytes memory dnsName,
@@ -132,18 +133,16 @@ library LeashOrgLib {
     /// @notice Setter calldatas for `grantSetterRoles`: the resolver only decodes the text key from them
     ///         and grants `ROLE_SET_TEXT` on `keccak256(bytes(key))`.
     function riskManagerSetters() internal pure returns (bytes[] memory setters) {
-        setters = new bytes[](3);
+        setters = new bytes[](2);
         setters[0] = textSetter(KEY_DAILY_NOTIONAL);
         setters[1] = textSetter(KEY_TOKENS);
-        setters[2] = textSetter(KEY_MAX_SLIPPAGE_BPS);
     }
 
     /// @notice Text keys the risk manager may write, same order as `riskManagerSetters`.
     function riskManagerKeys() internal pure returns (string[] memory keys) {
-        keys = new string[](3);
+        keys = new string[](2);
         keys[0] = KEY_DAILY_NOTIONAL;
         keys[1] = KEY_TOKENS;
-        keys[2] = KEY_MAX_SLIPPAGE_BPS;
     }
 
     /// @notice `setText("", key, "")` calldata, the shape `grantSetterRoles` expects for a text key.

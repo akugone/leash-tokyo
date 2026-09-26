@@ -96,12 +96,13 @@ server.registerTool(
     try {
       const r = await client.swap(amount, undefined, slippageBps === undefined ? undefined : BigInt(slippageBps));
       if (r.status === "ok") {
+        const q = (v: bigint) => `${formatUnits(v, r.quote.decimals)} ${r.quote.symbol}`;
         const fill =
           r.filled < r.amount
-            ? ` Partial fill: ${formatUnits(r.filled, 18)} of ${amount} swapped, the price limit (${bpsText(r.slippageBps)}) was reached.`
+            ? ` Partial fill: ${q(r.filled)} of ${q(r.amount)} swapped, the price limit (${bpsText(r.slippageBps)}) was reached.`
             : "";
         return text(
-          `OK: swapped ${formatUnits(r.filled, 18)} quote, tx ${r.txHash}, block ${r.block}, slippage ${bpsText(r.slippageBps)}.${fill} Spent today ${formatUnits(r.spentToday, 18)} of cap ${formatUnits(r.cap, 18)}.`,
+          `OK: swapped ${q(r.filled)}, tx ${r.txHash}, block ${r.block}, slippage ${bpsText(r.slippageBps)}.${fill} Spent today ${q(r.spentToday)} of cap ${q(r.cap)}.`,
         );
       }
       return fail(`REVERT: ${r.reason}. Nothing moved.`);

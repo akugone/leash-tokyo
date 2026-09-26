@@ -83,6 +83,18 @@ export function parseTokenList(value: string): Address[] {
     .filter((s) => s.length > 0 && isAddress(s)) as Address[];
 }
 
+/// `leash.maxSlippageBps` as the hook parses it: empty means not enforced, otherwise a base 10 integer below 10000.
+/// Anything else makes the hook revert `InvalidRecord` on every swap, so it is reported, never shown as "no bound".
+export type SlippageRecord = { bps: bigint | null; error: string | null };
+
+export function parseSlippageRecord(value: string): SlippageRecord {
+  if (value === "") return { bps: null, error: null };
+  if (!/^[0-9]{1,78}$/.test(value)) return { bps: null, error: `malformed record "${value}"` };
+  const bps = BigInt(value);
+  if (bps >= 10_000n) return { bps: null, error: `out of range "${value}" (max 9999)` };
+  return { bps, error: null };
+}
+
 // ============ Config ============
 
 export type DashboardConfig = {

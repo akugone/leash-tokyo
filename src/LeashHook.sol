@@ -39,7 +39,10 @@ contract LeashHook is BaseHook {
     string public constant KEY_QUOTE = "leash.quote";
     string public constant KEY_DAILY_NOTIONAL = "leash.dailyNotional";
     string public constant KEY_TOKENS = "leash.tokens";
-    /// @notice Optional. Widest price move a swap may allow, in basis points of the pool price. Empty: not enforced.
+    /// @notice Optional. Maximum price impact of one swap, in basis points of the pool price at execution: the swap's
+    ///         `sqrtPriceLimitX96` may not let the price move further than that. It does not guard against a price
+    ///         already moved before the swap (no reference price is signed). Empty: not enforced. Owner-only key: the
+    ///         risk manager holds no role on it, so nobody below the owner can clear it.
     string public constant KEY_MAX_SLIPPAGE_BPS = "leash.maxSlippageBps";
 
     uint256 internal constant BPS = 10_000;
@@ -271,7 +274,7 @@ contract LeashHook is BaseHook {
         if (!LeashPolicyLib.contains(tokens, token0)) revert TokenNotAllowed(token0);
         if (!LeashPolicyLib.contains(tokens, token1)) revert TokenNotAllowed(token1);
 
-        // 10. Slippage: the swap's price limit may not be wider than the policy allows from the current price.
+        // 10. Price impact: the swap's price limit may not be wider than the policy allows from the current price.
         (bool enforced, uint256 bps) = _readMaxSlippage(IExtendedResolver(resolver), dnsName);
         if (enforced) {
             uint160 bound = priceLimit(key.toId(), params.zeroForOne, bps);

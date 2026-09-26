@@ -19,6 +19,7 @@ import {
   dnsEncode,
   labelId,
   lookbackStart,
+  parseSlippageRecord,
   parseTokenList,
   textCalldata,
   type Deployments,
@@ -35,8 +36,10 @@ export type Policy = {
   cap: bigint;
   tokens: Address[];
   expiry: bigint;
-  /// `leash.maxSlippageBps`, null when the record is empty and the hook does not bound slippage.
+  /// `leash.maxSlippageBps`, null when the record is empty (or the hook predates the bound) and nothing is enforced.
   maxSlippageBps: bigint | null;
+  /// Set when the record is malformed: the hook then reverts `InvalidRecord` on every swap.
+  maxSlippageError: string | null;
   /// "hook" when read through `policy()`, "resolver" when read directly (the hook reverted).
   source: "hook" | "resolver";
 };
@@ -106,6 +109,22 @@ function isLeashRevoked(err: unknown): boolean {
   );
 }
 
+/// `maxSlippageBps(label)` result for the policy. A revert without a known error is a hook deployed before the
+/// bound existed: nothing enforced. `InvalidRecord` means every swap fails, so it is kept as an error.
+function slippageFromHook(
+  res: Field<readonly [boolean, bigint]>,
+): Pick<Policy, "maxSlippageBps" | "maxSlippageError"> {
+  if (res.value)
+    return { maxSlippageBps: res.value[0] ? res.value[1] : null, maxSlippageError: null };
+  if (res.error.startsWith("InvalidRecord")) {
+    return {
+      maxSlippageBps: null,
+      maxSlippageError: "malformed record, the hook rejects every swap",
+    };
+  }
+  return { maxSlippageBps: null, maxSlippageError: null };
+}
+
 async function field<T>(p: Promise<T>): Promise<Field<T>> {
   try {
     return { value: await p, error: null };
@@ -137,14 +156,15 @@ async function readPolicyFromResolver(
     call(textCalldata("leash.maxSlippageBps")),
   ]);
   const capText = decodeText(capRaw).trim();
-  const slippageText = decodeText(slippageRaw).trim();
+  const slippage = parseSlippageRecord(decodeText(slippageRaw));
   return {
     agent: decodeAddr(agentRaw),
     quote: decodeText(quoteRaw).trim() as Address,
     cap: capText ? BigInt(capText) : 0n,
     tokens: parseTokenList(decodeText(tokensRaw)),
     expiry,
-    maxSlippageBps: /^\d+$/.test(slippageText) ? BigInt(slippageText) : null,
+    maxSlippageBps: slippage.bps,
+    maxSlippageError: slippage.error,
     source: "resolver",
   };
 }
@@ -231,7 +251,7 @@ export async function fetchSnapshot(
         cap,
         tokens: [...tokens],
         expiry: BigInt(exp),
-        maxSlippageBps: slippage.value && slippage.value[0] ? slippage.value[1] : null,
+        ...slippageFromHook(slippage),
         source: "hook",
       },
       error: null,

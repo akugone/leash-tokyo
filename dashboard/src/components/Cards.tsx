@@ -42,7 +42,11 @@ export function Cards({ snapshot, deployments }: Props) {
           </Fact>
           <Fact label="max slippage" error={snapshot?.policy.error}>
             {policy ? (
-              policy.maxSlippageBps === null ? (
+              policy.maxSlippageError ? (
+                <span className="fact-error" title={policy.maxSlippageError}>
+                  {policy.maxSlippageError}
+                </span>
+              ) : policy.maxSlippageBps === null ? (
                 <small>not bounded</small>
               ) : (
                 <>

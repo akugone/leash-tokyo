@@ -38,6 +38,12 @@ contract RiskManagerTriesRevoke is DeploymentsScript {
         (ok, ret) = address(resolver)
             .call(abi.encodeCall(IPermissionedResolver.setText, (name, "leash.quote", vm.toString(riskManager))));
         _report("setText(leash.quote) by risk-manager", ok, ret);
+
+        // 4. Clear the slippage bound: owner-only key, an empty record would switch the bound off.
+        vm.prank(riskManager);
+        (ok, ret) =
+            address(resolver).call(abi.encodeCall(IPermissionedResolver.setText, (name, "leash.maxSlippageBps", "")));
+        _report("setText(leash.maxSlippageBps) by risk-manager", ok, ret);
     }
 
     function _report(string memory what, bool ok, bytes memory ret) internal pure {

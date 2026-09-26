@@ -91,11 +91,17 @@ export function chooseAmount(
 }
 
 /**
- * Slippage to request, in basis points: what the caller asked, else the policy bound, else none (full price range).
- * Never clamped to the policy: a wider request goes out and the hook answers `SlippageTooLoose`.
+ * Slippage to request, in basis points: what the caller asked, else 90% of the policy bound, else none (full price
+ * range). The hook recomputes its bound from the price at execution, so a limit sitting exactly on the bound fails
+ * `SlippageTooLoose` as soon as the price moves between the read and the swap, even in the agent's favour; the 10%
+ * headroom absorbs that. Bounds too small to take 10% off are used as is. Never clamped to the policy: a wider
+ * request goes out and the hook answers `SlippageTooLoose`.
  */
 export function chooseSlippage(requested: bigint | undefined, policyMax: bigint | null): bigint | null {
-  return requested ?? policyMax;
+  if (requested !== undefined) return requested;
+  if (policyMax === null) return null;
+  const withHeadroom = (policyMax * 9n) / 10n;
+  return withHeadroom > 0n ? withHeadroom : policyMax;
 }
 
 export function parseCliArgs(argv: readonly string[]): Options {

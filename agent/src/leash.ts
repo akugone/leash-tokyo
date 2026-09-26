@@ -9,6 +9,7 @@ import {
   defineChain,
   formatUnits,
   http,
+  parseEventLogs,
   parseUnits,
   type Address,
   type Hex,
@@ -66,11 +67,12 @@ export type SwapResult =
       txHash: Hex;
       block: bigint;
       amount: bigint;
-      /** Quote actually swapped. Below `amount` when the price limit stopped the swap (partial fill). */
+      /** Quote actually swapped, from the hook's `LeashSwap` event. Below `amount` on a partial fill. */
       filled: bigint;
       spentToday: bigint;
       cap: bigint;
       slippageBps: bigint | null;
+      quote: LeashState["quote"];
     }
   | { status: "revert"; reason: string; amount: bigint };
 
@@ -139,7 +141,7 @@ export class LeashClient {
       await this.emit({ kind: "revert", name, text: `policy read reverted: ${reason}` });
       throw new LeashError(`${name}: ${reason}`, reason);
     }
-    const [remaining, spent, nonce, slippage] = await Promise.all([
+    const [remaining, spent, nonce, maxSlippageBps] = await Promise.all([
       this.publicClient.readContract({
         address: hook,
         abi: LEASH_HOOK_ABI,
@@ -148,12 +150,7 @@ export class LeashClient {
       }),
       this.publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: "spentToday", args: [node] }),
       this.publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: "nonces", args: [node] }),
-      this.publicClient.readContract({
-        address: hook,
-        abi: LEASH_HOOK_ABI,
-        functionName: "maxSlippageBps",
-        args: [label],
-      }),
+      this.readMaxSlippage(label, name, ctx),
     ]);
     const quoteMeta = await tokenMeta(this.publicClient, policy[1]);
     const state: LeashState = {
@@ -168,7 +165,7 @@ export class LeashClient {
       tokens: policy[3],
       expiry: policy[4],
       nonce,
-      maxSlippageBps: slippage[0] ? slippage[1] : null,
+      maxSlippageBps,
     };
     if (emitPolicy) {
       await this.emit({
@@ -288,8 +285,11 @@ export class LeashClient {
       functionName: "spentToday",
       args: [state.node],
     });
-    // Same UTC day as the policy read unless the swap crossed midnight, where the counter restarts.
-    const filled = spentToday >= state.spent ? spentToday - state.spent : spentToday;
+    // The hook's own measure of this swap: robust to other swaps under the name and to a midnight rollover.
+    const swapLog = parseEventLogs({ abi: LEASH_HOOK_ABI, eventName: "LeashSwap", logs: receipt.logs }).find(
+      (l) => l.address.toLowerCase() === deployments.hook.toLowerCase() && l.args.node === state.node,
+    );
+    const filled = swapLog?.args.notional ?? amount;
     const partial = filled < amount ? `, partial fill ${this.fmt(state, filled)}: price limit reached` : "";
     await this.emit({
       kind: "ok",
@@ -308,7 +308,35 @@ export class LeashClient {
       spentToday,
       cap: state.cap,
       slippageBps,
+      quote: state.quote,
     };
+  }
+
+  /**
+   * `leash.maxSlippageBps` as the hook reads it. A hook built before the slippage bound has no such view: that is
+   * "not enforced", like an empty record. A malformed record makes the hook revert `InvalidRecord`, which fails
+   * every swap, so it surfaces as a `LeashError` instead of being hidden.
+   */
+  private async readMaxSlippage(
+    label: string,
+    name: string,
+    ctx: { label: string; parentName: string },
+  ): Promise<bigint | null> {
+    try {
+      const [enforced, bps] = await this.publicClient.readContract({
+        address: this.deployments.hook,
+        abi: LEASH_HOOK_ABI,
+        functionName: "maxSlippageBps",
+        args: [label],
+      });
+      return enforced ? bps : null;
+    } catch (err) {
+      const data = revertDataFromError(err);
+      if (!data || data === "0x") return null;
+      const reason = explainRevert(decodeRevertData(data), ctx);
+      await this.emit({ kind: "revert", name, text: `slippage read reverted: ${reason}` });
+      throw new LeashError(`${name}: ${reason}`, reason);
+    }
   }
 
   fmt(state: Pick<LeashState, "quote">, value: bigint): string {
