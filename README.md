@@ -13,7 +13,8 @@ The org is **`leash.eth`** on the ENSv2 beta, and its agent is **`trader-1.leash
 | Contract | Address | |
 |---|---|---|
 | `LeashHook` (Uniswap v4 hook) | [`0x8c1f16B42C75190316636a956A4C85F8D1c440c0`](https://sepolia.etherscan.io/address/0x8c1f16B42C75190316636a956A4C85F8D1c440c0#code) | verified |
-| `LeashVault` (org treasury the agent trades from) | [`0x3Ee1b2a02CA8a87572B6d172913Db37bd3C37022`](https://sepolia.etherscan.io/address/0x3Ee1b2a02CA8a87572B6d172913Db37bd3C37022#code) | verified |
+| `LeashVault` (org treasury the agents trade from, records refusals) | [`0xF585aB28733dEB745105f4d8F960c4CcE4bC025B`](https://sepolia.etherscan.io/address/0xF585aB28733dEB745105f4d8F960c4CcE4bC025B#code) | verified |
+| Previous `LeashVault`, before `trySwap` (empty, funds moved) | [`0x3Ee1b2a02CA8a87572B6d172913Db37bd3C37022`](https://sepolia.etherscan.io/address/0x3Ee1b2a02CA8a87572B6d172913Db37bd3C37022#code) | verified |
 | lUSD, the quote token (`token0`) | [`0x3EC79AB413c942159218358dfb6EB83Fa1F59C4E`](https://sepolia.etherscan.io/address/0x3EC79AB413c942159218358dfb6EB83Fa1F59C4E#code) | verified |
 | lETH (`token1`) | [`0x9E63305f38825e126BBD7A9582a53bd516431C02`](https://sepolia.etherscan.io/address/0x9E63305f38825e126BBD7A9582a53bd516431C02#code) | verified |
 | Org Permissioned Registry of `leash.eth` | [`0xe614c0f0D9Ce98Aaf986Fce5f5Ef46614DF64fE9`](https://sepolia.etherscan.io/address/0xe614c0f0D9Ce98Aaf986Fce5f5Ef46614DF64fE9) | ENS `VerifiableFactory` proxy |
@@ -32,9 +33,10 @@ Pool: lUSD/lETH, fee 3000, tick spacing 60, id `0x74e548ef341b71b902f9f0b6ff76c3
 **Check it yourself**
 
 1. On the hook's [Read Contract](https://sepolia.etherscan.io/address/0x8c1f16B42C75190316636a956A4C85F8D1c440c0#readContract) tab, call `policy("trader-1")`. It returns the agent address, quote token, cap, allowed tokens and expiry, read live from the ENS resolver. `remainingToday("trader-1")` and `maxSlippageBps("trader-1")` work the same way.
-2. The first agent swap, [`0x7ca3b71b…2425e9`](https://sepolia.etherscan.io/tx/0x7ca3b71bd806aa3150fb0b3e8e4686160fa6080c97fe98025bd147fa4f2425e9): the agent calls the vault, the vault pays 25 lUSD, and the hook emits `LeashSwap` with the spend counted against the cap.
-3. The agent's address holds no lUSD and no lETH: the tokens sit in the vault, which only trades on pools gated by the hook, and only the owner can withdraw from it.
-4. On the dashboard, **Try to revoke** simulates the risk manager calling `unregister`, `setAddress` and the owner-only records. Each call reverts with `EACUnauthorizedAccountRoles`, the ENSv2 Enhanced Access Control error.
+2. An agent swap, [`0xe289a614…c55857`](https://sepolia.etherscan.io/tx/0xe289a614c9614923730a1abf8ca3794149a01bf9a0f96926bbda652ac0c55857): the agent calls the vault, the vault pays 5 lUSD, and the hook emits `LeashSwap` with the spend counted against the cap.
+3. A refused order, recorded on chain, [`0x42dd5f63…f00bc2`](https://sepolia.etherscan.io/tx/0x42dd5f635dc8c680249e776cadb65177396c6754e9dabd286e2193696df00bc2): the agent asked for 500 lUSD over a 100 lUSD cap through the vault's `trySwap`. The transaction succeeds, nothing moves, and the vault emits `SwapRefused` carrying the hook's `DailyCapExceeded` error. The dashboard's activity feed decodes it.
+4. The agent's address holds no lUSD and no lETH: the tokens sit in the vault, which only trades on pools gated by the hook, and only the owner can withdraw from it.
+5. On the dashboard, **Try to revoke** simulates the risk manager calling `unregister`, `setAddress` and the owner-only records. Each call reverts with `EACUnauthorizedAccountRoles`, the ENSv2 Enhanced Access Control error.
 
 ---
 
