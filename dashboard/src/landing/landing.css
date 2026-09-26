@@ -560,32 +560,30 @@ code {
 }
 
 /* Problems */
-.lp-problems {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-}
-
-.lp-problems > div {
+/* What it solves: the risk in the title, Leash's answer below it */
+.lp-solve h4 {
   display: flex;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
-.lp-problems .lp-ko {
+.lp-solve-mark {
   flex: none;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
   border-radius: 50%;
   border: 1px solid var(--lp-line-strong);
-  font-size: 12px;
+  color: var(--lp-muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.lp-problems p {
-  margin: 4px 0 0;
-  font-size: 15px;
-  color: var(--lp-muted);
+.lp-solve p {
+  padding-left: 32px;
 }
 
 /* Steps */
@@ -782,7 +780,6 @@ code {
     margin-left: auto;
   }
   .lp-grid-3,
-  .lp-problems,
   .lp-split {
     grid-template-columns: 1fr;
   }
