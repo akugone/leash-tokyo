@@ -10,7 +10,7 @@ Every value is a JSON string. Keys:
 | Key | Meaning |
 | --- | --- |
 | `chainId` | `11155111` for Sepolia and for an anvil fork of Sepolia |
-| `parentLabel`, `parentName`, `parentNode` | the org `.eth` name, e.g. `leashdemo`, `leashdemo.eth`, its namehash |
+| `parentLabel`, `parentName`, `parentNode` | the org `.eth` name, e.g. `leash`, `leash.eth`, its namehash |
 | `parentTokenId` | ERC1155 token id of the parent name in `ETHRegistry`, written by `RegisterParent.reveal()` |
 | `orgOwner`, `riskManager`, `agent` | the three demo addresses |
 | `agentLabel` | subname label, e.g. `trader-1` |

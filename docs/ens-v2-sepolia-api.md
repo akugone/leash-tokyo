@@ -78,7 +78,7 @@ function resolve(bytes name, bytes data) view returns (bytes);           // ENSI
 function multicall(bytes[] calls) external returns (bytes[]);
 ```
 
-- `name` is the DNS-encoded full name, e.g. `\x08trader-1\x09leashdemo\x03eth\x00`. The resolver derives `node = namehash(name)` itself.
+- `name` is the DNS-encoded full name, e.g. `\x08trader-1\x05leash\x03eth\x00`. The resolver derives `node = namehash(name)` itself.
 - `grantRoles(...)` is disabled and always reverts. Use `grantSetterRoles(abi.encodeCall(setText, ("", "leash.dailyNotional", "")), riskManager)`. The resolver decodes the calldata, derives `resource = keccak256(bytes(key))` and grants `ROLE_SET_TEXT` on it. The caller needs `ROLE_SET_TEXT_ADMIN` on that resource or on root.
 - **Scoping is per record key, not per name.** A risk-manager with `ROLE_SET_TEXT` on `resource("leash.dailyNotional")` can set that key on every name served by this resolver. One resolver per org means the risk desk manages every agent's cap, which is the intended model. It still cannot touch `addr`, other keys, or the registry.
 - Reads go through `resolve`. The `bytes32 node` argument inside `data` is ignored:
