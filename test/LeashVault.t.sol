@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import {Vm} from "forge-std/Vm.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -202,6 +203,41 @@ contract LeashVaultTest is LeashHookBase {
         (bool ok,) = vault.trySwap(key, _params(fits), fitsData);
         assertTrue(ok);
         assertEq(hook.nonces(node), 1);
+    }
+
+    /// @dev Starving the hook of gas must never forge a refusal: at every gas budget, the call either reverts or
+    ///      records the hook's real answer. Found on a Sepolia fork, where gas estimation picked a budget that ran
+    ///      the hook dry and recorded an empty WrappedError.
+    function test_TrySwap_NeverRecordsAStarvedHook() public {
+        // Set the router approval first, so every budget below pays the same path.
+        SwapIntent memory small = _intent(-int256(1e18), 0);
+        bytes memory smallData = _signedHookData(LABEL, small, agentPk);
+        vm.prank(agent);
+        vault.trySwap(key, _params(small), smallData);
+
+        // forge-lint: disable-next-line(unsafe-typecast)
+        SwapIntent memory intent = _intent(-int256(CAP + 1), 1);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        bytes memory expected = _wrappedHookError(
+            IHooks.afterSwap.selector,
+            abi.encodeWithSelector(LeashHook.DailyCapExceeded.selector, node, CAP + 1e18 + 1, CAP)
+        );
+        bytes memory call = abi.encodeCall(LeashVault.trySwap, (key, _params(intent), hookData));
+        uint256 recorded;
+        for (uint256 budget = 40_000; budget <= 600_000; budget += 10_000) {
+            vm.recordLogs();
+            vm.prank(agent);
+            (bool success,) = address(vault).call{gas: budget}(call);
+            Vm.Log[] memory logs = vm.getRecordedLogs();
+            if (!success) continue;
+            for (uint256 i = 0; i < logs.length; i++) {
+                if (logs[i].topics[0] != LeashVault.SwapRefused.selector) continue;
+                (, bytes memory reason) = abi.decode(logs[i].data, (int256, bytes));
+                assertEq(reason, expected, "a starved hook was recorded as a refusal");
+                recorded++;
+            }
+        }
+        assertGt(recorded, 0, "no budget reached the real refusal");
     }
 
     /// @dev The vault's own checks are not attempts: they revert, nothing is recorded.

@@ -5,6 +5,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -36,7 +37,8 @@ contract LeashVault is Ownable {
 
     error NotLeashPool(address hooks);
     error NotSigner(address signer, address caller);
-    /// @dev `trySwap` got a revert without data: out of gas or a bare revert, not a policy answer worth recording.
+    /// @dev `trySwap` got no policy answer: the inner call ran out of gas, or reverted without data (directly or
+    ///      wrapped by the PoolManager). Recording it would let a caller forge refusals by starving the hook of gas.
     error EmptyRefusal();
 
     // ============ Events ============
@@ -77,12 +79,13 @@ contract LeashVault is Ownable {
         returns (bool ok, BalanceDelta delta)
     {
         bytes32 node = _authorize(key, params, hookData);
+        uint256 gasBefore = gasleft();
         try ROUTER.swap(key, params, _settings(), hookData) returns (BalanceDelta swapped) {
             emit VaultSwap(msg.sender, node, params.amountSpecified, swapped);
             return (true, swapped);
         } catch (bytes memory reason) {
-            // Starving the inner call of gas also lands here, with no data: refuse to record that as a policy answer.
-            if (reason.length == 0) revert EmptyRefusal();
+            // Out of gas: the call gets 63/64 of what is left, so after it runs dry about 1/64 remains.
+            if (gasleft() <= gasBefore / 63 || _isEmptyReason(reason)) revert EmptyRefusal();
             emit SwapRefused(msg.sender, node, params.amountSpecified, reason);
             return (false, BalanceDelta.wrap(0));
         }
@@ -107,6 +110,22 @@ contract LeashVault is Ownable {
         if (signer != msg.sender) revert NotSigner(signer, msg.sender);
         _approveRouter(params.zeroForOne ? key.currency0 : key.currency1);
         return intent.node;
+    }
+
+    /// @dev No data, or a PoolManager `WrappedError` around no data (a hook that ran dry reverts empty).
+    function _isEmptyReason(bytes memory reason) private pure returns (bool) {
+        if (reason.length == 0) return true;
+        if (reason.length < 4 || bytes4(reason) != CustomRevert.WrappedError.selector) return false;
+        (,, bytes memory inner,) = abi.decode(_slice4(reason), (address, bytes4, bytes, bytes));
+        return inner.length == 0;
+    }
+
+    /// @dev `data` without its 4 byte selector.
+    function _slice4(bytes memory data) private pure returns (bytes memory out) {
+        out = new bytes(data.length - 4);
+        for (uint256 i = 0; i < out.length; i++) {
+            out[i] = data[i + 4];
+        }
     }
 
     function _settings() private pure returns (PoolSwapTest.TestSettings memory) {

@@ -310,7 +310,10 @@ export class LeashClient {
         account: this.account,
       });
       if (result[0]) return null; // the swap would now go through: not a refusal anymore
-      const txHash = await this.walletClient.writeContract(request);
+      // The estimate is the least gas that does not revert. Headroom so the hook always runs to its real answer;
+      // the vault refuses to record a hook that ran dry (EmptyRefusal).
+      const gas = await this.publicClient.estimateContractGas(request);
+      const txHash = await this.walletClient.writeContract({ ...request, gas: (gas * 5n) / 4n });
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
       return receipt.status === "success" ? txHash : null;
     } catch {
