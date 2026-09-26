@@ -3,7 +3,11 @@ pragma solidity 0.8.26;
 
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -23,16 +27,24 @@ import {LeashPolicyLib} from "./libraries/LeashPolicyLib.sol";
 /// @title LeashHook
 /// @notice Uniswap v4 hook that gates every swap on an ENSv2 subname and the risk policy stored in its resolver.
 /// @dev `beforeSwap` authenticates the agent (name alive, EIP-712 intent signed by the name's `addr` record, tokens
-///      allowed). `afterSwap` counts the real quote token delta against the daily cap read from `leash.dailyNotional`.
+///      allowed, price limit within `leash.maxSlippageBps`). `afterSwap` counts the real quote token delta against the
+///      daily cap read from `leash.dailyNotional`.
 ///      The hook ignores `sender`: any v4 router works, authentication is carried in `hookData`.
 contract LeashHook is BaseHook {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     // ============ Constants ============
 
     string public constant KEY_QUOTE = "leash.quote";
     string public constant KEY_DAILY_NOTIONAL = "leash.dailyNotional";
     string public constant KEY_TOKENS = "leash.tokens";
+    /// @notice Optional. Widest price move a swap may allow, in basis points of the pool price. Empty: not enforced.
+    string public constant KEY_MAX_SLIPPAGE_BPS = "leash.maxSlippageBps";
+
+    uint256 internal constant BPS = 10_000;
+    /// @dev 1e40 bps scales sqrtPrice by 1e18, more than MAX_SQRT_PRICE / MIN_SQRT_PRICE (~3.4e38) allows.
+    uint256 internal constant MAX_BPS_UP = 1e40;
 
     /// @dev Transient storage slots bridging `beforeSwap` and `afterSwap` (EIP-1153, `tstore`/`tload`).
     uint256 private constant T_NODE = 0x00;
@@ -70,6 +82,7 @@ contract LeashHook is BaseHook {
     error TokenNotAllowed(address token);
     error QuoteNotInPool(address quote);
     error DailyCapExceeded(bytes32 node, uint256 spent, uint256 cap);
+    error SlippageTooLoose(uint160 sqrtPriceLimitX96, uint160 bound);
 
     // ============ Events ============
 
@@ -130,6 +143,36 @@ contract LeashHook is BaseHook {
         bytes memory dnsName = EnsNameLib.dnsEncode(label, _parentDnsName);
         agent = LeashEnsLib.readAddr(IExtendedResolver(resolver), dnsName);
         (quote, cap, tokens) = _readPolicy(IExtendedResolver(resolver), dnsName);
+    }
+
+    /// @notice Slippage bound of `label`: `enforced` is false when `leash.maxSlippageBps` is empty.
+    /// @dev Reverts like `policy`: `LeashRevoked`, `NoResolver`, `InvalidRecord`.
+    function maxSlippageBps(string memory label) external view returns (bool enforced, uint256 bps) {
+        uint256 labelId = EnsNameLib.labelId(label);
+        bytes32 node = EnsNameLib.childNode(PARENT_NODE, label);
+        uint64 expiry = ORG_REGISTRY.getExpiry(labelId);
+        if (expiry <= block.timestamp) revert LeashRevoked(node, expiry);
+        address resolver = ORG_REGISTRY.getResolver(label);
+        if (resolver == address(0)) revert NoResolver(node);
+        return _readMaxSlippage(IExtendedResolver(resolver), EnsNameLib.dnsEncode(label, _parentDnsName));
+    }
+
+    /// @notice Widest `sqrtPriceLimitX96` a swap in `poolId` may use for a `bps` slippage, from the current price.
+    ///         The hook compares against `priceLimit(poolId, zeroForOne, leash.maxSlippageBps)`; agents call it with
+    ///         their own `bps` (at most the policy) to build a limit the hook accepts.
+    function priceLimit(PoolId poolId, bool zeroForOne, uint256 bps) public view returns (uint160) {
+        if (zeroForOne && bps >= BPS) return TickMath.MIN_SQRT_PRICE + 1;
+        // Beyond this the limit is past MAX_SQRT_PRICE from any price, and the product below would overflow.
+        if (bps > MAX_BPS_UP) bps = MAX_BPS_UP;
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
+        // Price is sqrtPrice^2, so a `bps` price move scales sqrtPrice by sqrt(1 -/+ bps / BPS), here with 18 decimals.
+        uint256 scale = FixedPointMathLib.sqrt((zeroForOne ? BPS - bps : BPS + bps) * 1e36 / BPS);
+        uint256 limit = FullMath.mulDiv(sqrtPriceX96, scale, 1e18);
+        // Both casts are bounded by the TickMath comparison on the same line.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        if (zeroForOne) return limit > TickMath.MIN_SQRT_PRICE ? uint160(limit) : TickMath.MIN_SQRT_PRICE + 1;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return limit < TickMath.MAX_SQRT_PRICE ? uint160(limit) : TickMath.MAX_SQRT_PRICE - 1;
     }
 
     /// @notice Full EIP-712 digest of `intent` under this hook's domain, i.e. what the agent signs.
@@ -228,7 +271,16 @@ contract LeashHook is BaseHook {
         if (!LeashPolicyLib.contains(tokens, token0)) revert TokenNotAllowed(token0);
         if (!LeashPolicyLib.contains(tokens, token1)) revert TokenNotAllowed(token1);
 
-        // 10. Hand over to afterSwap.
+        // 10. Slippage: the swap's price limit may not be wider than the policy allows from the current price.
+        (bool enforced, uint256 bps) = _readMaxSlippage(IExtendedResolver(resolver), dnsName);
+        if (enforced) {
+            uint160 bound = priceLimit(key.toId(), params.zeroForOne, bps);
+            if (params.zeroForOne ? params.sqrtPriceLimitX96 < bound : params.sqrtPriceLimitX96 > bound) {
+                revert SlippageTooLoose(params.sqrtPriceLimitX96, bound);
+            }
+        }
+
+        // 11. Hand over to afterSwap.
         _tstore(T_NODE, uint256(node));
         _tstore(T_AGENT, uint256(uint160(agent)));
         _tstore(T_QUOTE, uint256(uint160(quote)));
@@ -280,6 +332,19 @@ contract LeashHook is BaseHook {
         tokens = LeashPolicyLib.parseAddressList(LeashEnsLib.readText(resolver, dnsName, KEY_TOKENS), KEY_TOKENS);
         quote = LeashPolicyLib.parseAddress(LeashEnsLib.readText(resolver, dnsName, KEY_QUOTE), KEY_QUOTE);
         cap = LeashPolicyLib.parseUint(LeashEnsLib.readText(resolver, dnsName, KEY_DAILY_NOTIONAL), KEY_DAILY_NOTIONAL);
+    }
+
+    /// @dev Reads `leash.maxSlippageBps`: empty means not enforced, otherwise a base 10 integer below `BPS`.
+    function _readMaxSlippage(IExtendedResolver resolver, bytes memory dnsName)
+        internal
+        view
+        returns (bool enforced, uint256 bps)
+    {
+        string memory raw = LeashEnsLib.readText(resolver, dnsName, KEY_MAX_SLIPPAGE_BPS);
+        if (bytes(raw).length == 0) return (false, 0);
+        bps = LeashPolicyLib.parseUint(raw, KEY_MAX_SLIPPAGE_BPS);
+        if (bps >= BPS) revert LeashPolicyLib.InvalidRecord(KEY_MAX_SLIPPAGE_BPS);
+        return (true, bps);
     }
 
     // ============ Private functions ============

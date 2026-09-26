@@ -16,7 +16,15 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { LEASH_HOOK_ABI, POOL_SWAP_TEST_ABI } from "./abi.ts";
-import { MAX_SQRT_PRICE, MIN_SQRT_PRICE, POOL_SWAP_TEST, ensureAllowance, tokenMeta, type Deployments } from "./bot.ts";
+import {
+  POOL_SWAP_TEST,
+  chooseSlippage,
+  ensureAllowance,
+  priceLimitFor,
+  slippageText,
+  tokenMeta,
+  type Deployments,
+} from "./bot.ts";
 import { decodeRevertData, explainRevert, revertDataFromError } from "./errors.ts";
 import { encodeHookData, leashDomain, namehash, signIntent, type SwapIntent } from "./intent.ts";
 
@@ -48,10 +56,22 @@ export type LeashState = {
   tokens: readonly Address[];
   expiry: bigint;
   nonce: bigint;
+  /** `leash.maxSlippageBps`, or null when the record is empty and the hook does not bound slippage. */
+  maxSlippageBps: bigint | null;
 };
 
 export type SwapResult =
-  | { status: "ok"; txHash: Hex; block: bigint; amount: bigint; spentToday: bigint; cap: bigint }
+  | {
+      status: "ok";
+      txHash: Hex;
+      block: bigint;
+      amount: bigint;
+      /** Quote actually swapped. Below `amount` when the price limit stopped the swap (partial fill). */
+      filled: bigint;
+      spentToday: bigint;
+      cap: bigint;
+      slippageBps: bigint | null;
+    }
   | { status: "revert"; reason: string; amount: bigint };
 
 export class LeashError extends Error {
@@ -61,6 +81,11 @@ export class LeashError extends Error {
   ) {
     super(message);
   }
+}
+
+/** "100 bps (1%)", or "none" when the policy does not bound slippage. */
+export function bpsText(bps: bigint | null): string {
+  return bps === null ? "none" : `${bps} bps (${Number(bps) / 100}%)`;
 }
 
 // ============ Client ============
@@ -114,7 +139,7 @@ export class LeashClient {
       await this.emit({ kind: "revert", name, text: `policy read reverted: ${reason}` });
       throw new LeashError(`${name}: ${reason}`, reason);
     }
-    const [remaining, spent, nonce] = await Promise.all([
+    const [remaining, spent, nonce, slippage] = await Promise.all([
       this.publicClient.readContract({
         address: hook,
         abi: LEASH_HOOK_ABI,
@@ -123,6 +148,12 @@ export class LeashClient {
       }),
       this.publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: "spentToday", args: [node] }),
       this.publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: "nonces", args: [node] }),
+      this.publicClient.readContract({
+        address: hook,
+        abi: LEASH_HOOK_ABI,
+        functionName: "maxSlippageBps",
+        args: [label],
+      }),
     ]);
     const quoteMeta = await tokenMeta(this.publicClient, policy[1]);
     const state: LeashState = {
@@ -137,12 +168,13 @@ export class LeashClient {
       tokens: policy[3],
       expiry: policy[4],
       nonce,
+      maxSlippageBps: slippage[0] ? slippage[1] : null,
     };
     if (emitPolicy) {
       await this.emit({
         kind: "policy",
         name,
-        text: `cap ${this.fmt(state, state.cap)}, spent ${this.fmt(state, state.spent)}, remaining ${this.fmt(state, state.remaining)}, nonce ${nonce}`,
+        text: `cap ${this.fmt(state, state.cap)}, spent ${this.fmt(state, state.spent)}, remaining ${this.fmt(state, state.remaining)}, max slippage ${bpsText(state.maxSlippageBps)}, nonce ${nonce}`,
       });
     }
     return state;
@@ -150,16 +182,16 @@ export class LeashClient {
 
   /**
    * Exact-input swap of `amount` quote tokens (human units, e.g. "25"). Simulates first: a hook revert comes
-   * back as `{ status: "revert" }` with the decoded reason instead of throwing. Never clamps the amount:
-   * the hook is the enforcement point, not this client.
+   * back as `{ status: "revert" }` with the decoded reason instead of throwing. Never clamps the amount or the
+   * slippage: the hook is the enforcement point, not this client. `slippageBps` defaults to the policy bound.
    */
-  swap(amountHuman: string, label = this.deployments.agentLabel): Promise<SwapResult> {
-    const next = this.queue.then(() => this.swapNow(amountHuman, label));
+  swap(amountHuman: string, label = this.deployments.agentLabel, slippageBps?: bigint): Promise<SwapResult> {
+    const next = this.queue.then(() => this.swapNow(amountHuman, label, slippageBps));
     this.queue = next.catch(() => undefined);
     return next;
   }
 
-  private async swapNow(amountHuman: string, label: string): Promise<SwapResult> {
+  private async swapNow(amountHuman: string, label: string, requestedSlippage?: bigint): Promise<SwapResult> {
     // The intent event that follows already carries the numbers, no separate policy line.
     const state = await this.readState(label, false);
     const { deployments } = this;
@@ -179,11 +211,19 @@ export class LeashClient {
     const signature = await signIntent(this.account, leashDomain(chainId, deployments.hook), intent);
     const hookData = encodeHookData(label, intent, signature);
     const amountText = this.fmt(state, amount);
+    const slippageBps = chooseSlippage(requestedSlippage, state.maxSlippageBps);
+    const sqrtPriceLimitX96 = await priceLimitFor(
+      this.publicClient,
+      deployments.hook,
+      deployments.poolId,
+      intent.zeroForOne,
+      slippageBps,
+    );
     await this.emit({
       kind: "intent",
       name: state.name,
       amount: amountText,
-      text: `signed SwapIntent: ${amountText} exact in, ${quoteIsToken0 ? "0->1" : "1->0"}, nonce ${state.nonce}`,
+      text: `signed SwapIntent: ${amountText} exact in, ${quoteIsToken0 ? "0->1" : "1->0"}, ${slippageText(slippageBps, state.maxSlippageBps)}, nonce ${state.nonce}`,
     });
 
     await ensureAllowance(
@@ -206,7 +246,7 @@ export class LeashClient {
       {
         zeroForOne: intent.zeroForOne,
         amountSpecified: intent.amountSpecified,
-        sqrtPriceLimitX96: intent.zeroForOne ? MIN_SQRT_PRICE + 1n : MAX_SQRT_PRICE - 1n,
+        sqrtPriceLimitX96,
       },
       { takeClaims: false, settleUsingBurn: false },
       hookData,
@@ -248,15 +288,27 @@ export class LeashClient {
       functionName: "spentToday",
       args: [state.node],
     });
+    // Same UTC day as the policy read unless the swap crossed midnight, where the counter restarts.
+    const filled = spentToday >= state.spent ? spentToday - state.spent : spentToday;
+    const partial = filled < amount ? `, partial fill ${this.fmt(state, filled)}: price limit reached` : "";
     await this.emit({
       kind: "ok",
       name: state.name,
       amount: amountText,
       txHash,
       block: receipt.blockNumber.toString(),
-      text: `OK block ${receipt.blockNumber}, spent today ${this.fmt(state, spentToday)} of ${this.fmt(state, state.cap)}`,
+      text: `OK block ${receipt.blockNumber}, spent today ${this.fmt(state, spentToday)} of ${this.fmt(state, state.cap)}${partial}`,
     });
-    return { status: "ok", txHash, block: receipt.blockNumber, amount, spentToday, cap: state.cap };
+    return {
+      status: "ok",
+      txHash,
+      block: receipt.blockNumber,
+      amount,
+      filled,
+      spentToday,
+      cap: state.cap,
+      slippageBps,
+    };
   }
 
   fmt(state: Pick<LeashState, "quote">, value: bigint): string {

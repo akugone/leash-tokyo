@@ -5,6 +5,7 @@ export const hookAbi = parseAbi([
   "function spentToday(bytes32 node) view returns (uint256)",
   "function remainingToday(string label) view returns (uint256)",
   "function policy(string label) view returns (address agent, address quote, uint256 cap, address[] tokens, uint64 expiry)",
+  "function maxSlippageBps(string label) view returns (bool enforced, uint256 bps)",
   "function agentName(string label) view returns (bytes dnsName, bytes32 node)",
   "function PARENT_NODE() view returns (bytes32)",
   "function ORG_REGISTRY() view returns (address)",

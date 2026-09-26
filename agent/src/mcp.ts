@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { formatUnits, type Hex } from "viem";
 import { z } from "zod";
 import { loadDeployments, resolveDeploymentsPath } from "./bot.ts";
-import { LeashClient, LeashError } from "./leash.ts";
+import { LeashClient, LeashError, bpsText } from "./leash.ts";
 
 const agentDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 try {
@@ -46,7 +46,7 @@ server.registerTool(
   {
     title: "Read the Leash policy",
     description:
-      "Read the trading mandate the Leash hook enforces for this agent's ENS name: daily cap, spent today, remaining today, allowed tokens, expiry, nonce. Call it before trading and whenever the operator asks about limits.",
+      "Read the trading mandate the Leash hook enforces for this agent's ENS name: daily cap, spent today, remaining today, max slippage, allowed tokens, expiry, nonce. Call it before trading and whenever the operator asks about limits.",
     inputSchema: {},
   },
   async () => {
@@ -60,6 +60,7 @@ server.registerTool(
         `daily cap: ${formatUnits(s.cap, d)} ${s.quote.symbol}`,
         `spent today: ${formatUnits(s.spent, d)} ${s.quote.symbol}`,
         `remaining today: ${formatUnits(s.remaining, d)} ${s.quote.symbol}`,
+        `max slippage: ${bpsText(s.maxSlippageBps)}`,
         `allowed tokens: ${s.tokens.join(", ") || "none"}`,
         `expiry: ${s.expiry === 0n ? "revoked" : new Date(Number(s.expiry) * 1000).toISOString()}`,
         `nonce: ${s.nonce}`,
@@ -77,20 +78,30 @@ server.registerTool(
   {
     title: "Swap through the Leash hook",
     description:
-      'Sell `amount` of the quote token (human units, e.g. "25" for 25 lUSD) for the other pool token through Uniswap v4, with an EIP-712 SwapIntent signed by this agent. The Leash hook checks the name, the allowlist and the daily cap on chain; an over-cap or revoked trade comes back as a REVERT with the decoded reason. Never clamp or refuse an amount yourself: attempt it and report what the chain said.',
+      'Sell `amount` of the quote token (human units, e.g. "25" for 25 lUSD) for the other pool token through Uniswap v4, with an EIP-712 SwapIntent signed by this agent. The Leash hook checks the name, the allowlist, the slippage bound and the daily cap on chain; an over-cap, too-loose or revoked trade comes back as a REVERT with the decoded reason. `slippageBps` (optional) is the price move the swap may allow, in basis points (100 = 1%); it defaults to the policy maximum. If the price limit is reached the swap is partially filled and the result says so. Never clamp or refuse an amount or a slippage yourself: attempt it and report what the chain said.',
     inputSchema: {
       amount: z
         .string()
         .regex(/^\d+(\.\d+)?$/, "decimal number in quote token units")
         .describe('Amount of quote token to sell, e.g. "25"'),
+      slippageBps: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("Max price move in basis points (100 = 1%). Omit to use the policy maximum."),
     },
   },
-  async ({ amount }) => {
+  async ({ amount, slippageBps }) => {
     try {
-      const r = await client.swap(amount);
+      const r = await client.swap(amount, undefined, slippageBps === undefined ? undefined : BigInt(slippageBps));
       if (r.status === "ok") {
+        const fill =
+          r.filled < r.amount
+            ? ` Partial fill: ${formatUnits(r.filled, 18)} of ${amount} swapped, the price limit (${bpsText(r.slippageBps)}) was reached.`
+            : "";
         return text(
-          `OK: swapped ${amount} quote, tx ${r.txHash}, block ${r.block}. Spent today ${formatUnits(r.spentToday, 18)} of cap ${formatUnits(r.cap, 18)}.`,
+          `OK: swapped ${formatUnits(r.filled, 18)} quote, tx ${r.txHash}, block ${r.block}, slippage ${bpsText(r.slippageBps)}.${fill} Spent today ${formatUnits(r.spentToday, 18)} of cap ${formatUnits(r.cap, 18)}.`,
         );
       }
       return fail(`REVERT: ${r.reason}. Nothing moved.`);

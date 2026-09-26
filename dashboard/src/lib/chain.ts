@@ -35,6 +35,8 @@ export type Policy = {
   cap: bigint;
   tokens: Address[];
   expiry: bigint;
+  /// `leash.maxSlippageBps`, null when the record is empty and the hook does not bound slippage.
+  maxSlippageBps: bigint | null;
   /// "hook" when read through `policy()`, "resolver" when read directly (the hook reverted).
   source: "hook" | "resolver";
 };
@@ -127,19 +129,22 @@ async function readPolicyFromResolver(
       functionName: "resolve",
       args: [dnsName, data],
     });
-  const [agentRaw, quoteRaw, capRaw, tokensRaw] = await Promise.all([
+  const [agentRaw, quoteRaw, capRaw, tokensRaw, slippageRaw] = await Promise.all([
     call(addrCalldata()),
     call(textCalldata("leash.quote")),
     call(textCalldata("leash.dailyNotional")),
     call(textCalldata("leash.tokens")),
+    call(textCalldata("leash.maxSlippageBps")),
   ]);
   const capText = decodeText(capRaw).trim();
+  const slippageText = decodeText(slippageRaw).trim();
   return {
     agent: decodeAddr(agentRaw),
     quote: decodeText(quoteRaw).trim() as Address,
     cap: capText ? BigInt(capText) : 0n,
     tokens: parseTokenList(decodeText(tokensRaw)),
     expiry,
+    maxSlippageBps: /^\d+$/.test(slippageText) ? BigInt(slippageText) : null,
     source: "resolver",
   };
 }
@@ -199,7 +204,7 @@ export async function fetchSnapshot(
   const hook = { address: deployments.hook, abi: hookAbi } as const;
 
   const blockP = field(client.getBlock({ blockTag: "latest" }));
-  const [block, owner, expiry, resolver, policyRaw, spentToday, remainingToday, nonce] =
+  const [block, owner, expiry, resolver, policyRaw, spentToday, remainingToday, nonce, slippage] =
     await Promise.all([
       blockP,
       field(client.readContract({ ...registry, functionName: "getOwner", args: [id] })),
@@ -212,6 +217,7 @@ export async function fetchSnapshot(
       field(client.readContract({ ...hook, functionName: "spentToday", args: [node] })),
       field(client.readContract({ ...hook, functionName: "remainingToday", args: [label] })),
       field(client.readContract({ ...hook, functionName: "nonces", args: [node] })),
+      field(client.readContract({ ...hook, functionName: "maxSlippageBps", args: [label] })),
     ]);
 
   let policy: Field<Policy>;
@@ -219,7 +225,15 @@ export async function fetchSnapshot(
   if (policyRaw.ok) {
     const [agent, quote, cap, tokens, exp] = policyRaw.value;
     policy = {
-      value: { agent, quote, cap, tokens: [...tokens], expiry: BigInt(exp), source: "hook" },
+      value: {
+        agent,
+        quote,
+        cap,
+        tokens: [...tokens],
+        expiry: BigInt(exp),
+        maxSlippageBps: slippage.value && slippage.value[0] ? slippage.value[1] : null,
+        source: "hook",
+      },
       error: null,
     };
   } else {

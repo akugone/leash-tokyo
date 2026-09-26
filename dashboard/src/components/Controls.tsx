@@ -60,8 +60,8 @@ export function Controls({ onChanged, revoked }: { onChanged: () => void; revoke
           )}
         </div>
         <p className="role-hint">
-          Can edit two records of the agent's name, <code>leash.dailyNotional</code> and{" "}
-          <code>leash.tokens</code>. Nothing else.
+          Can edit three records of the agent's name, <code>leash.dailyNotional</code>,{" "}
+          <code>leash.tokens</code> and <code>leash.maxSlippageBps</code>. Nothing else.
         </p>
         <div className="role-row">
           <label className="field">

@@ -62,6 +62,7 @@ Modes:
 | --- | --- | --- |
 | none | min(`--amount` or 10% of cap, remaining) | prints the reason and skips the tick |
 | `--misbehave` | remaining + 1, or cap + 1 when nothing is left | skips when the policy read reverts |
+| `--slippage-bps <n>` | price move the swap may allow; defaults to the policy's `leash.maxSlippageBps` (full range when unset), never clamped | a wider value than the policy goes out as is and the hook answers `SlippageTooLoose` |
 | `--force` | exactly `--amount`, default 1e18 wei, never clamped | still signs and sends, so the audience sees the on chain rejection (`LeashRevoked`, `DailyCapExceeded`, ...). Falls back to the last nonce it read if `nonces(node)` fails, and derives the direction from `quote == token0` in the deployments JSON |
 
 Each tick prints one status line (agent, cap, remaining today, nonce, expiry), then either the tx hash and

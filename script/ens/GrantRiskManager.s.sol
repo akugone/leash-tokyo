@@ -8,10 +8,11 @@ import {ResolverRoles} from "../../src/libraries/EnsRoles.sol";
 import {EnsScriptBase} from "./EnsScriptBase.s.sol";
 import {LeashOrgLib} from "./LeashOrgLib.sol";
 
-/// @notice Give the risk manager `ROLE_SET_TEXT` on `leash.dailyNotional` and `leash.tokens` only (ticket L-07).
+/// @notice Give the risk manager `ROLE_SET_TEXT` on `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`
+///         only (ticket L-07).
 /// @dev `grantRoles` is disabled on the deployed resolver; `grantSetterRoles` decodes a setter calldata,
 ///      derives the resource from the text key and grants the matching role. Scoping is per key, not per name:
-///      the risk manager can edit these two keys on every agent served by the org resolver, nothing else,
+///      the risk manager can edit these three keys on every agent served by the org resolver, nothing else,
 ///      and holds no role on the registry.
 contract GrantRiskManager is EnsScriptBase {
     // ============ External functions ============

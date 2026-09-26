@@ -108,6 +108,8 @@ export function explainRevert(decoded: DecodedRevert, ctx: NameContext): string 
       return `TokenNotAllowed: ${a[0]} is not in leash.tokens`;
     case "QuoteNotInPool":
       return `QuoteNotInPool: leash.quote ${a[0]} is not one of the pool currencies`;
+    case "SlippageTooLoose":
+      return `SlippageTooLoose: price limit ${a[0]} is wider than leash.maxSlippageBps allows (bound ${a[1]})`;
     case "InvalidRecord":
       return `InvalidRecord: text record "${a[0]}" is malformed, the hook fails closed`;
     case "Error":

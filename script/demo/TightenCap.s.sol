@@ -9,8 +9,8 @@ import {LeashEnsLib} from "../../src/libraries/LeashEnsLib.sol";
 import {DeploymentsScript} from "../Deployments.sol";
 
 /// @notice Demo act 4: the risk-manager tightens the agent's daily cap.
-/// @dev Signs with `RISK_MANAGER_PK`, which only holds `ROLE_SET_TEXT` on the `leash.dailyNotional` and
-///      `leash.tokens` keys. `NEW_CAP` env var, default 1 (raw quote units), so the next swap must fail.
+/// @dev Signs with `RISK_MANAGER_PK`, which only holds `ROLE_SET_TEXT` on the `leash.dailyNotional`,
+///      `leash.tokens` and `leash.maxSlippageBps` keys. `NEW_CAP` env var, default 1 (raw quote units), so the next swap must fail.
 ///      Usage: forge script script/demo/TightenCap.s.sol --rpc-url $RPC --broadcast
 contract TightenCap is DeploymentsScript {
     string internal constant KEY = "leash.dailyNotional";

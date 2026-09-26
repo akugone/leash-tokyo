@@ -21,6 +21,7 @@ library LeashOrgLib {
     string internal constant KEY_QUOTE = "leash.quote";
     string internal constant KEY_DAILY_NOTIONAL = "leash.dailyNotional";
     string internal constant KEY_TOKENS = "leash.tokens";
+    string internal constant KEY_MAX_SLIPPAGE_BPS = "leash.maxSlippageBps";
 
     /// @dev `VerifiableFactory` salts. The factory mixes in `msg.sender`, so they are per owner.
     uint256 internal constant REGISTRY_SALT = uint256(keccak256("leash.registry.v1"));
@@ -90,6 +91,25 @@ library LeashOrgLib {
         calls[3] = abi.encodeCall(IPermissionedResolver.setText, (dnsName, KEY_TOKENS, tokenListString(tokens)));
     }
 
+    /// @notice Same as `policyCalls` plus `leash.maxSlippageBps`, the widest price move a swap may allow.
+    /// @param maxSlippageBps Basis points of the pool price, below 10000, written as a decimal string.
+    function policyCalls(
+        bytes memory dnsName,
+        address agent,
+        address quote,
+        uint256 cap,
+        address[] memory tokens,
+        uint256 maxSlippageBps
+    ) internal pure returns (bytes[] memory calls) {
+        bytes[] memory base = policyCalls(dnsName, agent, quote, cap, tokens);
+        calls = new bytes[](base.length + 1);
+        for (uint256 i = 0; i < base.length; i++) {
+            calls[i] = base[i];
+        }
+        calls[base.length] =
+            abi.encodeCall(IPermissionedResolver.setText, (dnsName, KEY_MAX_SLIPPAGE_BPS, capString(maxSlippageBps)));
+    }
+
     /// @notice `0x` + 40 hex chars, checksummed. Accepted by `LeashPolicyLib.parseAddress`.
     function addressString(address a) internal pure returns (string memory) {
         return LibString.toHexStringChecksummed(a);
@@ -112,16 +132,18 @@ library LeashOrgLib {
     /// @notice Setter calldatas for `grantSetterRoles`: the resolver only decodes the text key from them
     ///         and grants `ROLE_SET_TEXT` on `keccak256(bytes(key))`.
     function riskManagerSetters() internal pure returns (bytes[] memory setters) {
-        setters = new bytes[](2);
+        setters = new bytes[](3);
         setters[0] = textSetter(KEY_DAILY_NOTIONAL);
         setters[1] = textSetter(KEY_TOKENS);
+        setters[2] = textSetter(KEY_MAX_SLIPPAGE_BPS);
     }
 
     /// @notice Text keys the risk manager may write, same order as `riskManagerSetters`.
     function riskManagerKeys() internal pure returns (string[] memory keys) {
-        keys = new string[](2);
+        keys = new string[](3);
         keys[0] = KEY_DAILY_NOTIONAL;
         keys[1] = KEY_TOKENS;
+        keys[2] = KEY_MAX_SLIPPAGE_BPS;
     }
 
     /// @notice `setText("", key, "")` calldata, the shape `grantSetterRoles` expects for a text key.

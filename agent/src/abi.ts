@@ -7,6 +7,8 @@ export const LEASH_HOOK_ABI = parseAbi([
   "function spentToday(bytes32 node) view returns (uint256)",
   "function remainingToday(string label) view returns (uint256)",
   "function policy(string label) view returns (address agent, address quote, uint256 cap, address[] tokens, uint64 expiry)",
+  "function maxSlippageBps(string label) view returns (bool enforced, uint256 bps)",
+  "function priceLimit(bytes32 poolId, bool zeroForOne, uint256 bps) view returns (uint160)",
   "function agentName(string label) view returns (bytes dnsName, bytes32 node)",
   "function DOMAIN_SEPARATOR() view returns (bytes32)",
   "function hashIntent(SwapIntent intent) view returns (bytes32)",
@@ -25,6 +27,7 @@ export const LEASH_HOOK_ABI = parseAbi([
   "error QuoteNotInPool(address quote)",
   "error DailyCapExceeded(bytes32 node, uint256 attempted, uint256 cap)",
   "error InvalidRecord(string key)",
+  "error SlippageTooLoose(uint160 sqrtPriceLimitX96, uint160 bound)",
 ]);
 
 /** v4-core `CustomRevert.WrappedError` (ERC-7751): how hook reverts bubble through the PoolManager. */
