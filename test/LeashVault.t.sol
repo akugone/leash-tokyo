@@ -134,6 +134,95 @@ contract LeashVaultTest is LeashHookBase {
         vault.swap(key, _params(intent), hookData);
     }
 
+    // ============ trySwap Tests ============
+
+    function test_TrySwap_Swaps() public {
+        SwapIntent memory intent = _intent(-int256(100e18), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        vm.expectEmit(true, true, false, false, address(vault));
+        emit LeashVault.VaultSwap(agent, node, intent.amountSpecified, BalanceDelta.wrap(0));
+        vm.prank(agent);
+        (bool ok, BalanceDelta delta) = vault.trySwap(key, _params(intent), hookData);
+
+        assertTrue(ok);
+        assertEq(int256(delta.amount0()), intent.amountSpecified);
+        assertEq(IERC20(token0).balanceOf(address(vault)), VAULT_FUNDS - 100e18);
+        assertEq(hook.spentToday(node), 100e18);
+        assertEq(hook.nonces(node), 1);
+    }
+
+    /// @dev Over the cap: the call succeeds, nothing moves, and the hook's own error is on chain.
+    function test_TrySwap_RecordsDailyCapExceeded() public {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        SwapIntent memory intent = _intent(-int256(CAP + 1), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        bytes memory reason = _wrappedHookError(
+            IHooks.afterSwap.selector, abi.encodeWithSelector(LeashHook.DailyCapExceeded.selector, node, CAP + 1, CAP)
+        );
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit LeashVault.SwapRefused(agent, node, intent.amountSpecified, reason);
+        vm.prank(agent);
+        (bool ok, BalanceDelta delta) = vault.trySwap(key, _params(intent), hookData);
+
+        assertFalse(ok);
+        assertEq(BalanceDelta.unwrap(delta), 0);
+        assertEq(IERC20(token0).balanceOf(address(vault)), VAULT_FUNDS);
+        assertEq(IERC20(token1).balanceOf(address(vault)), VAULT_FUNDS);
+        assertEq(hook.spentToday(node), 0);
+        assertEq(hook.nonces(node), 0);
+    }
+
+    function test_TrySwap_RecordsLeashRevoked() public {
+        registry.revoke(LABEL);
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        bytes memory reason = _wrappedHookError(
+            IHooks.beforeSwap.selector,
+            abi.encodeWithSelector(LeashHook.LeashRevoked.selector, node, uint64(vm.getBlockTimestamp()))
+        );
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit LeashVault.SwapRefused(agent, node, intent.amountSpecified, reason);
+        vm.prank(agent);
+        (bool ok,) = vault.trySwap(key, _params(intent), hookData);
+        assertFalse(ok);
+    }
+
+    /// @dev A refused attempt consumes no nonce: the same nonce trades once the order fits the mandate.
+    function test_TrySwap_NonceUsableAfterRefusal() public {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        SwapIntent memory tooBig = _intent(-int256(CAP + 1), 0);
+        bytes memory tooBigData = _signedHookData(LABEL, tooBig, agentPk);
+        vm.prank(agent);
+        (bool refused,) = vault.trySwap(key, _params(tooBig), tooBigData);
+        assertFalse(refused);
+
+        SwapIntent memory fits = _intent(-int256(10e18), 0);
+        bytes memory fitsData = _signedHookData(LABEL, fits, agentPk);
+        vm.prank(agent);
+        (bool ok,) = vault.trySwap(key, _params(fits), fitsData);
+        assertTrue(ok);
+        assertEq(hook.nonces(node), 1);
+    }
+
+    /// @dev The vault's own checks are not attempts: they revert, nothing is recorded.
+    function test_RevertWhen_TrySwap_NotSigner() public {
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        vm.expectRevert(abi.encodeWithSelector(LeashVault.NotSigner.selector, agent, stranger));
+        vm.prank(stranger);
+        vault.trySwap(key, _params(intent), hookData);
+    }
+
+    function test_RevertWhen_TrySwap_NotLeashPool() public {
+        PoolKey memory plain = key;
+        plain.hooks = IHooks(address(0));
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        vm.expectRevert(abi.encodeWithSelector(LeashVault.NotLeashPool.selector, address(0)));
+        vm.prank(agent);
+        vault.trySwap(plain, _params(intent), hookData);
+    }
+
     // ============ withdraw Tests ============
 
     function test_Withdraw() public {

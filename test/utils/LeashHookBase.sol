@@ -110,14 +110,17 @@ abstract contract LeashHookBase is Deployers {
 
     /// @dev PoolManager wraps hook reverts in `CustomRevert.WrappedError(hook, hookSelector, reason, HookCallFailed)`.
     function _expectHookRevert(bytes4 hookSelector, bytes memory reason) internal {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                CustomRevert.WrappedError.selector,
-                address(hook),
-                hookSelector,
-                reason,
-                abi.encodeWithSelector(Hooks.HookCallFailed.selector)
-            )
+        vm.expectRevert(_wrappedHookError(hookSelector, reason));
+    }
+
+    /// @dev The revert data a hook error reaches the caller with.
+    function _wrappedHookError(bytes4 hookSelector, bytes memory reason) internal view returns (bytes memory) {
+        return abi.encodeWithSelector(
+            CustomRevert.WrappedError.selector,
+            address(hook),
+            hookSelector,
+            reason,
+            abi.encodeWithSelector(Hooks.HookCallFailed.selector)
         );
     }
 

@@ -20,7 +20,8 @@ import {LeashIntentLib, SwapIntent} from "./libraries/LeashIntentLib.sol";
 ///      must be the intent signer: without it, anyone could replay an agent's pending intent against the org's funds
 ///      with a price limit of their choice. The hook then checks that signer against the name's `addr` record.
 ///      The router pulls the input from its caller and pays the output back to it, so the vault settles nothing
-///      itself. ERC20 pools only. Only the owner withdraws.
+///      itself. ERC20 pools only. Only the owner withdraws. `trySwap` records a refused swap as an event instead of
+///      reverting, so an agent's attempts beyond its mandate are provable on chain.
 contract LeashVault is Ownable {
     using SafeERC20 for IERC20;
 
@@ -35,10 +36,15 @@ contract LeashVault is Ownable {
 
     error NotLeashPool(address hooks);
     error NotSigner(address signer, address caller);
+    /// @dev `trySwap` got a revert without data: out of gas or a bare revert, not a policy answer worth recording.
+    error EmptyRefusal();
 
     // ============ Events ============
 
     event VaultSwap(address indexed agent, bytes32 indexed node, int256 amountSpecified, BalanceDelta delta);
+    /// @notice A swap the hook (or the pool) refused, recorded by `trySwap`. `reason` is the raw revert data, a
+    ///         `WrappedError` from the PoolManager around the hook's own error, e.g. `DailyCapExceeded`.
+    event SwapRefused(address indexed agent, bytes32 indexed node, int256 amountSpecified, bytes reason);
     event Withdrawn(address indexed token, address indexed to, uint256 amount);
 
     // ============ Constructor ============
@@ -56,15 +62,30 @@ contract LeashVault is Ownable {
         external
         returns (BalanceDelta delta)
     {
-        if (address(key.hooks) != address(HOOK)) revert NotLeashPool(address(key.hooks));
-        (, SwapIntent memory intent, bytes memory signature) = LeashIntentLib.decodeHookData(hookData);
-        address signer = ECDSA.recover(HOOK.hashIntent(intent), signature);
-        if (signer != msg.sender) revert NotSigner(signer, msg.sender);
+        bytes32 node = _authorize(key, params, hookData);
+        delta = ROUTER.swap(key, params, _settings(), hookData);
+        emit VaultSwap(msg.sender, node, params.amountSpecified, delta);
+    }
 
-        _approveRouter(params.zeroForOne ? key.currency0 : key.currency1);
-        delta =
-            ROUTER.swap(key, params, PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}), hookData);
-        emit VaultSwap(msg.sender, intent.node, params.amountSpecified, delta);
+    /// @notice Same as `swap`, but a refusal by the hook or the pool is recorded on chain instead of reverting:
+    ///         the call succeeds, nothing moves, and `SwapRefused` carries the reason. The caller pays the gas of
+    ///         the attempt, which makes every attempt beyond the mandate public and costly to the agent, never to
+    ///         the org. The vault's own checks (`NotLeashPool`, `NotSigner`) still revert: they are not attempts.
+    /// @dev The refused swap reverts inside the router call, so the hook's nonce and daily counter are untouched.
+    function trySwap(PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        external
+        returns (bool ok, BalanceDelta delta)
+    {
+        bytes32 node = _authorize(key, params, hookData);
+        try ROUTER.swap(key, params, _settings(), hookData) returns (BalanceDelta swapped) {
+            emit VaultSwap(msg.sender, node, params.amountSpecified, swapped);
+            return (true, swapped);
+        } catch (bytes memory reason) {
+            // Starving the inner call of gas also lands here, with no data: refuse to record that as a policy answer.
+            if (reason.length == 0) revert EmptyRefusal();
+            emit SwapRefused(msg.sender, node, params.amountSpecified, reason);
+            return (false, BalanceDelta.wrap(0));
+        }
     }
 
     /// @notice Sends `amount` of `token` to `to`.
@@ -74,6 +95,23 @@ contract LeashVault is Ownable {
     }
 
     // ============ Private functions ============
+
+    /// @dev The vault's own checks: a Leash pool, and the caller signed the intent. Returns the intent's node.
+    function _authorize(PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        private
+        returns (bytes32)
+    {
+        if (address(key.hooks) != address(HOOK)) revert NotLeashPool(address(key.hooks));
+        (, SwapIntent memory intent, bytes memory signature) = LeashIntentLib.decodeHookData(hookData);
+        address signer = ECDSA.recover(HOOK.hashIntent(intent), signature);
+        if (signer != msg.sender) revert NotSigner(signer, msg.sender);
+        _approveRouter(params.zeroForOne ? key.currency0 : key.currency1);
+        return intent.node;
+    }
+
+    function _settings() private pure returns (PoolSwapTest.TestSettings memory) {
+        return PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+    }
 
     /// @dev Unlimited approval, set once per token: the router only ever pulls from its own caller.
     function _approveRouter(Currency currency) private {
