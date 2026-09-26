@@ -61,6 +61,8 @@ Sell 300 lUSD → lETH: REVERT DailyCapExceeded (would reach 325 of 250 lUSD cap
 
 Feed: `signed SwapIntent: 300 lUSD …` then `REVERT DailyCapExceeded: trader-1.leash.eth would reach 325 lUSD of cap 250 lUSD today`. The agent did try: the prompt tells it never to clamp an order. The revert comes from `afterSwap`, measured on the real settlement delta.
 
+With the agent started as `LEASH_RECORD_REFUSALS=1 LEASH_NETWORK=sepolia script/demo.sh agent`, the refused order is sent anyway through the vault's `trySwap`: the agent answers with a tx hash, and the dashboard's **On chain** activity shows `tried 300 lUSD: refused, DailyCapExceeded (would reach 325 lUSD of cap 250 lUSD)` with its Etherscan link. The refusal itself is on chain.
+
 Say: we do not trust the agent's prompt, we trust the hook.
 
 ## Act 3b: the owner narrows the slippage (30 s, optional)
