@@ -101,6 +101,14 @@ Agent terminal: `buy 5 lUSD of lETH`. Claude's `leash_policy` comes back `LeashR
 
 Say: no key rotation, no redeploy. The agent still holds its key. The key is worth nothing.
 
+## Act 6: a new agent on the spot (40 s)
+
+Dashboard, **New agent** card (owner): name `trader-2`, the prefilled agent address, cap 100 lUSD, max slippage 50 bps, mandate 1 day, **Issue agent**. Two transactions: `register` on the org registry, then one `multicall` on the resolver writing `addr`, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`. The risk manager's roles are per record key on the resolver, so they cover `trader-2` at once. Click **Open trader-2.leash.eth**.
+
+Agent terminal: `buy 20 lUSD of lETH as trader-2`. Same key, a second name, its own mandate: `spent today 20 lUSD of 100 lUSD`, slippage requested at 45 bps (90% of 50).
+
+After a cut, the same card issues `trader-1` again: an expired or unregistered name can be registered anew, its nonce and daily counter carry on.
+
 ## Fallback without Claude Code
 
 The same acts from the shell, useful if the LLM is slow or offline. The scripted bot never clamps either.
