@@ -10,6 +10,8 @@ export type FeedEvent = {
 };
 
 const FEED_POLL_MS = 1_000;
+/// The hosted build has no dev server behind it, so no feed: do not poll, say where the feed lives instead.
+const HOSTED = import.meta.env.PROD;
 const MAX_ROWS = 40;
 const SOURCE_LABEL: Record<string, string> = {
   agent: "agent",
@@ -21,13 +23,14 @@ const SOURCE_LABEL: Record<string, string> = {
 /// What the agent and the humans did, newest first. Fed by the dev server's /api/agent-events.
 export function AgentFeed({ onActivity }: { onActivity?: () => void }) {
   const [rows, setRows] = useState<FeedEvent[]>([]);
-  const [available, setAvailable] = useState<boolean | null>(null);
+  const [available, setAvailable] = useState<boolean | null>(HOSTED ? false : null);
   const [lastAgentAt, setLastAgentAt] = useState<number | null>(null);
   const after = useRef(0);
   const onActivityRef = useRef(onActivity);
   onActivityRef.current = onActivity;
 
   useEffect(() => {
+    if (HOSTED) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
@@ -69,11 +72,13 @@ export function AgentFeed({ onActivity }: { onActivity?: () => void }) {
           Activity <span className={`feed-dot ${active ? "on" : ""}`} aria-hidden="true" />
         </h2>
         <span className="hint">
-          {available === false
-            ? "Feed offline. Start the dashboard with bun run dev."
-            : rows.length === 0
-              ? "Waiting for the agent"
-              : `${rows.length} events`}
+          {HOSTED
+            ? "Live during the local demo. Swaps below are read from Sepolia."
+            : available === false
+              ? "Feed offline. Start the dashboard with bun run dev."
+              : rows.length === 0
+                ? "Waiting for the agent"
+                : `${rows.length} events`}
         </span>
       </div>
       <ol className="feed-list">
