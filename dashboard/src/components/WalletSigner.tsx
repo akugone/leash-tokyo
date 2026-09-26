@@ -1,16 +1,18 @@
-// Wallet mode of the role cards: the owner and the risk manager sign from their own wallet through Reown
-// AppKit. Loaded lazily, only when there is no dev server and a Reown project id is set.
+// Wallet mode of the signer: the owner and the risk manager sign from their own wallet through Reown AppKit.
+// Loaded lazily, only when there is no dev server and a Reown project id is set.
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { OptionsController } from "@reown/appkit-controllers";
 import { sepolia as sepoliaNetwork } from "@reown/appkit/networks";
 import { createAppKit, useAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { http, type Abi, type Address } from "viem";
 import { sepolia } from "viem/chains";
 import { WagmiProvider, useAccount, usePublicClient, useSwitchChain, useWalletClient } from "wagmi";
 import {
   cutCall,
+  fundCalls,
+  FUND_AMOUNT,
   issueCalls,
   registryWriteAbi,
   forbiddenCalls,
@@ -20,17 +22,21 @@ import {
   type LeashTarget,
 } from "../lib/actions";
 import { labelId, shortHex, type Deployments } from "../lib/leash";
-import { RoleCards, issuedOutcome, ttlSeconds, type RoleActions, type RoleGate } from "./Controls";
-
-const TX_URL = "https://sepolia.etherscan.io/tx/";
+import {
+  SEPOLIA_TX_URL,
+  SignerValue,
+  issuedOutcome,
+  ttlSeconds,
+  type RoleActions,
+  type RoleGate,
+} from "./signer";
 
 type Props = {
   projectId: string;
   rpc: string;
   deployments: Deployments;
   label: string;
-  revoked: boolean;
-  onChanged: () => void;
+  children: ReactNode;
 };
 
 let setup: { adapter: WagmiAdapter; queryClient: QueryClient } | null = null;
@@ -78,10 +84,7 @@ function appKit(projectId: string, rpc: string) {
   return setup;
 }
 
-export default function WalletControls(props: Props) {
-  // The wallet path signs Sepolia transactions only; a local anvil record has the dev server instead.
-  if (Number(props.deployments.chainId) !== sepolia.id || !props.deployments.orgResolver)
-    return null;
+export default function WalletSigner(props: Props) {
   const { adapter, queryClient } = appKit(props.projectId, props.rpc);
   return (
     <WagmiProvider config={adapter.wagmiConfig}>
@@ -92,7 +95,7 @@ export default function WalletControls(props: Props) {
   );
 }
 
-function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
+function WalletRoles({ deployments, label, children }: Props) {
   const { address, isConnected, chainId } = useAccount();
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient({ chainId: sepolia.id });
@@ -240,6 +243,23 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
         return { tone: "bad", text: "Policy write reverted on chain.", txHash: written.hash };
       return issuedOutcome(form, deployments.parentName, calls.expiry, written.hash);
     },
+    fund: async () => {
+      if (!deployments.vault) throw new Error("No vault in the deployment record.");
+      let last = "";
+      for (const call of fundCalls(deployments.vault, [
+        deployments.token0,
+        deployments.token1,
+      ] as Address[])) {
+        const r = await send(call);
+        last = r.hash;
+        if (!r.ok) return { tone: "bad", text: "mint reverted on chain.", txHash: r.hash };
+      }
+      return {
+        tone: "ok",
+        text: `Vault funded with ${FUND_AMOUNT} lUSD and ${FUND_AMOUNT} lETH (test tokens).`,
+        txHash: last,
+      };
+    },
   };
 
   const header = (
@@ -275,18 +295,18 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
   );
 
   return (
-    <RoleCards
-      actions={actions}
-      riskManager={riskManager}
-      owner={owner}
-      riskGate={gate("risk manager", riskManager)}
-      ownerGate={gate("owner", owner)}
-      revoked={revoked}
-      onChanged={onChanged}
-      header={header}
-      txUrl={TX_URL}
-      parentName={deployments.parentName}
-      defaultAgent={deployments.agent ?? ""}
-    />
+    <SignerValue
+      value={{
+        actions,
+        riskGate: gate("risk manager", riskManager),
+        ownerGate: gate("owner", owner),
+        riskManager,
+        owner,
+        walletBar: header,
+        txUrl: SEPOLIA_TX_URL,
+      }}
+    >
+      {children}
+    </SignerValue>
   );
 }

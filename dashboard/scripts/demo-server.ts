@@ -5,11 +5,13 @@
  *   GET  /api/agent-events?after=<id> the dashboard polls new events
  *   DELETE /api/agent-events          clear the feed between rehearsals
  *   GET  /api/demo/status             {enabled, riskManager, owner, rpc}
+ *   Every action below takes an optional `label` (the dashboard's selected tab), default the record's agentLabel.
  *   POST /api/demo/tighten {cap}      risk-manager: setText(leash.dailyNotional) on the org resolver
  *   POST /api/demo/forbid             risk-manager tries unregister / setAddress / setText(leash.quote) /
  *                                     setText(leash.maxSlippageBps): must revert
  *   POST /api/demo/cut                owner: unregister(labelId) on the org registry
  *   POST /api/demo/slippage {bps}     owner: setText(leash.maxSlippageBps) on the org resolver, 1 to 9999
+ *   POST /api/demo/fund               owner: mint test lUSD and lETH to the org vault
  *   POST /api/demo/issue {label, agent, cap, bps, ttlSeconds}
  *                                     owner: register a new (or expired) agent subname and write its policy
  *
@@ -37,6 +39,8 @@ import {
   forbiddenCalls,
   forbiddenOutcome,
   agentLabelError,
+  FUND_AMOUNT,
+  fundCalls,
   issueCalls,
   registryWriteAbi,
   slippageCall,
@@ -82,7 +86,7 @@ function readEnv(): Record<string, string> {
   return { ...out, ...(process.env as Record<string, string>) };
 }
 
-function context() {
+function context(label?: string) {
   const env = readEnv();
   const file = resolve(repoDir, env.LEASH_DEPLOYMENTS_FILE || "deployments/anvil.json");
   if (!existsSync(file)) throw new Error(`deployments file not found: ${file}`);
@@ -99,8 +103,9 @@ function context() {
     const account = privateKeyToAccount(pk as Hex);
     return { account, client: createWalletClient({ account, chain, transport: http(rpc) }) };
   };
+  const agentLabel = label ?? d.agentLabel;
   const target: LeashTarget = {
-    label: d.agentLabel,
+    label: agentLabel,
     parentName: d.parentName,
     registry: d.orgRegistry as Address,
     resolver: d.orgResolver as Address,
@@ -110,7 +115,8 @@ function context() {
     rpc,
     publicClient,
     target,
-    fullName: `${d.agentLabel}.${d.parentName}`,
+    agentLabel,
+    fullName: `${agentLabel}.${d.parentName}`,
     resolver: d.orgResolver as Address,
     registry: d.orgRegistry as Address,
     riskManager: () => wallet(env.RISK_MANAGER_PK, "RISK_MANAGER_PK"),
@@ -124,8 +130,8 @@ function context() {
 
 // ============ Actions ============
 
-async function tighten(capHuman: string) {
-  const ctx = context();
+async function tighten(capHuman: string, label?: string) {
+  const ctx = context(label);
   const raw = parseUnits(capHuman, 18).toString();
   const { account, client } = ctx.riskManager();
   push({
@@ -148,8 +154,8 @@ async function tighten(capHuman: string) {
   return { txHash, block: receipt.blockNumber.toString(), status: receipt.status };
 }
 
-async function forbid() {
-  const ctx = context();
+async function forbid(label?: string) {
+  const ctx = context(label);
   const { account } = ctx.riskManager();
   const results: { ok: boolean; text: string }[] = [];
   for (const a of forbiddenCalls(ctx.target, account.address)) {
@@ -165,8 +171,8 @@ async function forbid() {
 }
 
 /// Owner only: the risk manager holds no role on this key (clearing it would switch the bound off).
-async function setSlippage(bps: string) {
-  const ctx = context();
+async function setSlippage(bps: string, label?: string) {
+  const ctx = context(label);
   const { account, client } = ctx.owner();
   push({
     source: "owner",
@@ -188,10 +194,10 @@ async function setSlippage(bps: string) {
   return { txHash, block: receipt.blockNumber.toString(), status: receipt.status };
 }
 
-async function cut() {
-  const ctx = context();
+async function cut(label?: string) {
+  const ctx = context(label);
   const { account, client } = ctx.owner();
-  const id = labelId(ctx.d.agentLabel);
+  const id = labelId(ctx.agentLabel);
   push({
     source: "owner",
     kind: "intent",
@@ -221,6 +227,32 @@ async function cut() {
     expiry: expiry.toString(),
     status: receipt.status,
   };
+}
+
+/// Owner: mint test tokens to the org vault, one `mint` per pool token. The demo tokens have an open mint.
+async function fund() {
+  const ctx = context();
+  const { account, client } = ctx.owner();
+  const vault = ctx.d.vault as Address | undefined;
+  if (!vault) throw new Error("no vault in the deployment record");
+  push({
+    source: "owner",
+    kind: "intent",
+    text: `owner funds the org vault with ${FUND_AMOUNT} lUSD and ${FUND_AMOUNT} lETH`,
+  });
+  let txHash: Hex = "0x";
+  let status: "success" | "reverted" = "success";
+  for (const call of fundCalls(vault, [ctx.d.token0, ctx.d.token1] as Address[])) {
+    txHash = await client.writeContract({ ...call, account, chain: client.chain });
+    status = (await ctx.publicClient.waitForTransactionReceipt({ hash: txHash })).status;
+    if (status !== "success") break;
+  }
+  const text =
+    status === "success"
+      ? `Vault funded with ${FUND_AMOUNT} lUSD and ${FUND_AMOUNT} lETH (test tokens).`
+      : "mint reverted on chain.";
+  push({ source: "owner", kind: status === "success" ? "ok" : "revert", text, txHash });
+  return { txHash, status, text };
 }
 
 /// Owner: the two transactions of script/ens/IssueAgent.s.sol, with the pool's quote and tokens.
@@ -344,24 +376,26 @@ export function leashDemoPlugin(): Plugin {
             });
           }
           if (req.method !== "POST") return json(res, 405, { error: "POST only" });
+          const body = await readBody(req);
+          const rawLabel = body.label === undefined ? undefined : String(body.label).trim();
+          const labelError = rawLabel === undefined ? null : agentLabelError(rawLabel);
+          if (labelError) return json(res, 400, { error: `label: ${labelError}` });
           if (url.pathname === "/api/demo/tighten") {
-            const body = await readBody(req);
             const cap = String(body.cap ?? "");
             if (!/^\d+(\.\d+)?$/.test(cap))
               return json(res, 400, { error: "cap must be a decimal number in lUSD" });
-            return json(res, 200, await tighten(cap));
+            return json(res, 200, await tighten(cap, rawLabel));
           }
           if (url.pathname === "/api/demo/slippage") {
-            const body = await readBody(req);
             const bps = String(body.bps ?? "").trim();
             const invalid = slippageInputError(bps);
             if (invalid) return json(res, 400, { error: invalid });
-            return json(res, 200, await setSlippage(String(BigInt(bps))));
+            return json(res, 200, await setSlippage(String(BigInt(bps)), rawLabel));
           }
-          if (url.pathname === "/api/demo/forbid") return json(res, 200, await forbid());
-          if (url.pathname === "/api/demo/cut") return json(res, 200, await cut());
+          if (url.pathname === "/api/demo/forbid") return json(res, 200, await forbid(rawLabel));
+          if (url.pathname === "/api/demo/cut") return json(res, 200, await cut(rawLabel));
+          if (url.pathname === "/api/demo/fund") return json(res, 200, await fund());
           if (url.pathname === "/api/demo/issue") {
-            const body = await readBody(req);
             const label = String(body.label ?? "").trim();
             const agent = String(body.agent ?? "").trim();
             const cap = String(body.cap ?? "").trim();

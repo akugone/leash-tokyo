@@ -103,11 +103,11 @@ Say: no key rotation, no redeploy. The agent still holds its key. The key is wor
 
 ## Act 6: a new agent on the spot (40 s)
 
-Dashboard, **New agent** card (owner): name `trader-2`, the prefilled agent address, cap 100 lUSD, max slippage 50 bps, mandate 1 day, **Issue agent**. Two transactions: `register` on the org registry, then one `multicall` on the resolver writing `addr`, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`. The risk manager's roles are per record key on the resolver, so they cover `trader-2` at once. Click **Open trader-2.leash.eth**.
+Dashboard, **+ New agent** tab (owner): the next free name (`trader-2`) and the demo agent address are prefilled; set cap 100 lUSD, max slippage 50 bps, mandate 1 day, **Issue agent**. Two transactions: `register` on the org registry, then one `multicall` on the resolver writing `addr`, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`. The risk manager's roles are per record key on the resolver, so they cover `trader-2` at once. The `trader-2 · LIVE` tab appears and opens. Tabs list every name the org registry issued, from its `LabelRegistered` events.
 
 Agent terminal: `buy 20 lUSD of lETH as trader-2`. Same key, a second name, its own mandate: `spent today 20 lUSD of 100 lUSD`, slippage requested at 45 bps (90% of 50).
 
-After a cut, the same card issues `trader-1` again: an expired or unregistered name can be registered anew, its nonce and daily counter carry on.
+After a cut, the tab stays greyed at the end of the bar, and the owner card offers **Re-issue**, prefilled with the name's last policy: an expired or unregistered name can be registered anew, its nonce and daily counter carry on. Every agent trades from the one org vault shown above the tabs; **Fund vault** mints 10,000 more of each test token into it.
 
 ## Fallback without Claude Code
 

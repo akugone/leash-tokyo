@@ -188,3 +188,34 @@ export function issueCalls(
     } as const,
   };
 }
+
+// ============ Funding the vault ============
+
+/// `LeashTestToken.mint`: open to anyone, the demo tokens have no value.
+export const mintAbi = parseAbi(["function mint(address to, uint256 amount)"]);
+
+/// Test tokens minted to the vault per pool token by "Fund vault".
+export const FUND_AMOUNT = "10000";
+
+/// One `mint` per pool token, straight to the vault.
+export function fundCalls(vault: Address, tokens: Address[], amountHuman = FUND_AMOUNT) {
+  const amount = parseUnits(amountHuman, 18);
+  return tokens.map(
+    (token) =>
+      ({
+        address: token,
+        abi: mintAbi,
+        functionName: "mint",
+        args: [vault, amount],
+      }) as const,
+  );
+}
+
+/// `trader-<n+1>` after the highest `trader-<n>` in use, `trader-2` when there is none.
+export function nextAgentLabel(labels: readonly string[]): string {
+  const numbers = labels
+    .map((l) => /^trader-(\d+)$/.exec(l)?.[1])
+    .filter(Boolean)
+    .map(Number);
+  return `trader-${Math.max(1, ...numbers) + 1}`;
+}

@@ -1,5 +1,6 @@
 // Config loading + 5 second polling. Keeps the last good snapshot when a poll fails.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PublicClient } from "viem";
 import { fetchSnapshot, makeClient, POLL_MS, type Snapshot } from "./lib/chain";
 import {
   configToSearch,
@@ -29,6 +30,8 @@ export function writeOverride(json: string | null) {
 }
 
 export type DashboardState = {
+  /// Read client for the configured RPC, null until the deployments load.
+  client: PublicClient | null;
   config: DashboardConfig;
   setConfig: (next: DashboardConfig) => void;
   deployments: Deployments | null;
@@ -134,6 +137,7 @@ export function useDashboard(): DashboardState {
   }, [client, deployments, config.label, tick]);
 
   return {
+    client,
     config,
     setConfig,
     deployments,
