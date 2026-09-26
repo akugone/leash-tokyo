@@ -10,6 +10,8 @@ A Uniswap v4 hook that gates every swap on the trading agent's ENSv2 subname and
 
 The org is **`leash.eth`** on the ENSv2 beta, and its agent is **`trader-1.leash.eth`**, resolved by its own Permissioned Resolver: a daily cap in lUSD, lUSD and lETH allowed, a max slippage per swap, a mandate that ends on 2026-10-26. The risk manager and the owner change these records during the demo, so the dashboard shows the current values rather than this page.
 
+Per agent delegation, live: **`trader-4.leash.eth`** was issued without the risk manager's role. Open its tab on the dashboard and click **Tighten the leash** on the risk-manager card: the write is simulated and ENS refuses it, `EACUnauthorizedAccountRoles`, with nothing sent and no wallet needed. The same click on `trader-1` is a real transaction the risk manager may sign.
+
 Contract addresses and how to check it yourself: [Deployed on Sepolia](#deployed-on-sepolia). The Uniswap v4 hook, line by line: [Where the Uniswap v4 integration lives](#where-the-uniswap-v4-integration-lives). Every agent owns its ENSv2 resolver: [One Permissioned Resolver per agent](#one-permissioned-resolver-per-agent).
 
 ---
@@ -215,6 +217,7 @@ Every agent has its own resolver, so a risk-manager's role covers the agents it 
 | Org Permissioned Registry of `leash.eth` | [`0xe614c0f0D9Ce98Aaf986Fce5f5Ef46614DF64fE9`](https://sepolia.etherscan.io/address/0xe614c0f0D9Ce98Aaf986Fce5f5Ef46614DF64fE9) | ENS `VerifiableFactory` proxy |
 | Own Permissioned Resolver of `trader-1.leash.eth` (its policy records) | [`0x084976Ed9Ca1ac81057250F3A5aB4a40B2f98ee8`](https://sepolia.etherscan.io/address/0x084976Ed9Ca1ac81057250F3A5aB4a40B2f98ee8) | ENS `VerifiableFactory` proxy |
 | Own Permissioned Resolver of `trader-2.leash.eth` | [`0xA0CA8bC1a9903B536e492e1DBd5C1E1c56D10b4d`](https://sepolia.etherscan.io/address/0xA0CA8bC1a9903B536e492e1DBd5C1E1c56D10b4d) | ENS `VerifiableFactory` proxy |
+| Own Permissioned Resolver of `trader-4.leash.eth`, no risk manager role | [`0x14D1c39BEa9A2a60784e0f0dC6b28CAc4459D23D`](https://sepolia.etherscan.io/address/0x14D1c39BEa9A2a60784e0f0dC6b28CAc4459D23D) | ENS `VerifiableFactory` proxy |
 | Previous resolver, shared by the agents before each got its own | [`0x5112C1F6bF910DC0B127BE2B109Dc484168c668F`](https://sepolia.etherscan.io/address/0x5112C1F6bF910DC0B127BE2B109Dc484168c668F) | ENS `VerifiableFactory` proxy |
 | ENSv2 `.eth` registry (holds `leash.eth`) | [`0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E`](https://sepolia.etherscan.io/address/0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E) | ENS |
 | Uniswap v4 PoolManager | [`0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`](https://sepolia.etherscan.io/address/0xE03A1074c86CFeDd5C142C4F04F1a1536e203543) | Uniswap |
