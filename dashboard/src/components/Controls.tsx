@@ -1,17 +1,74 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { isAddress } from "viem";
+import { agentLabelError } from "../lib/actions";
 import { shortHex, slippageInputError, type Deployments } from "../lib/leash";
 
 type Status = { enabled: boolean; riskManager: string | null; owner: string | null; name: string };
 
-export type Outcome = { tone: "ok" | "bad" | "info"; text: string; txHash?: string } | null;
+export type Outcome = {
+  tone: "ok" | "bad" | "info";
+  text: string;
+  txHash?: string;
+  link?: { href: string; text: string };
+} | null;
 
-/// The four human actions, however they get signed.
+/// A new agent as the owner fills it in: its label, signing address and mandate.
+export type IssueForm = {
+  label: string;
+  agent: string;
+  cap: string;
+  bps: string;
+  duration: string;
+  unit: "minutes" | "days";
+};
+
+/// The human actions, however they get signed.
 export type RoleActions = {
   tighten: (cap: string) => Promise<Outcome>;
   forbid: () => Promise<Outcome>;
   slippage: (bps: string) => Promise<Outcome>;
   cut: () => Promise<Outcome>;
+  issue: (form: IssueForm) => Promise<Outcome>;
 };
+
+export function ttlSeconds(form: IssueForm): bigint {
+  return BigInt(Math.round(Number(form.duration) * (form.unit === "days" ? 86_400 : 60)));
+}
+
+/// First problem with the form, or null when it can be sent.
+export function issueFormError(form: IssueForm): string | null {
+  const label = agentLabelError(form.label);
+  if (label) return `name: ${label}`;
+  if (!isAddress(form.agent)) return "agent: not an address";
+  if (!/^\d+(\.\d+)?$/.test(form.cap)) return "daily cap: a number of lUSD";
+  const bps = slippageInputError(form.bps);
+  if (bps) return `max slippage: ${bps}`;
+  if (!/^\d+(\.\d+)?$/.test(form.duration) || ttlSeconds(form) < 60n)
+    return "mandate: at least one minute";
+  return null;
+}
+
+/// This page, switched to another agent name.
+export function agentHref(label: string): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set("label", label);
+  return `${url.pathname}${url.search}`;
+}
+
+export function issuedOutcome(
+  form: IssueForm,
+  parentName: string,
+  expiry: bigint,
+  txHash: string,
+): Outcome {
+  const until = new Date(Number(expiry) * 1000).toISOString().slice(0, 16).replace("T", " ");
+  return {
+    tone: "ok",
+    text: `${form.label}.${parentName} issued: cap ${form.cap} lUSD, max slippage ${form.bps} bps, until ${until} UTC.`,
+    txHash,
+    link: { href: agentHref(form.label), text: `Open ${form.label}.${parentName}` },
+  };
+}
 
 /// Whether this page can sign as a role right now, and what to show when it cannot.
 export type RoleGate = { canSign: true } | { canSign: false; reason: string };
@@ -57,7 +114,8 @@ export function Controls(props: Props) {
 }
 
 /// Dev server mode: keys from the repo root .env, never in the browser.
-function ServerControls({ status, onChanged, revoked }: Props & { status: Status }) {
+function ServerControls({ status, onChanged, revoked, deployments }: Props & { status: Status }) {
+  const parentName = deployments?.parentName ?? "";
   const post = async (path: string, body: Record<string, unknown>) => {
     const res = await fetch(path, {
       method: "POST",
@@ -98,6 +156,18 @@ function ServerControls({ status, onChanged, revoked }: Props & { status: Status
         txHash: String(r.txHash),
       };
     },
+    issue: async (form) => {
+      const r = await post("/api/demo/issue", {
+        label: form.label,
+        agent: form.agent,
+        cap: form.cap,
+        bps: form.bps,
+        ttlSeconds: ttlSeconds(form).toString(),
+      });
+      if (r.status !== "success")
+        return { tone: "bad", text: "Reverted on chain.", txHash: String(r.txHash) };
+      return issuedOutcome(form, parentName, BigInt(String(r.expiry)), String(r.txHash));
+    },
   };
   const open: RoleGate = { canSign: true };
   return (
@@ -109,6 +179,8 @@ function ServerControls({ status, onChanged, revoked }: Props & { status: Status
       ownerGate={open}
       revoked={revoked}
       onChanged={onChanged}
+      parentName={parentName}
+      defaultAgent={deployments?.agent ?? ""}
     />
   );
 }
@@ -125,6 +197,10 @@ type CardsProps = {
   header?: ReactNode;
   /// Explorer transaction URL prefix, e.g. `https://sepolia.etherscan.io/tx/`.
   txUrl?: string;
+  /// The org name new agents are issued under, e.g. `leash.eth`.
+  parentName: string;
+  /// Prefilled agent address: the demo agent key, so the agent terminal can trade under the new name.
+  defaultAgent: string;
 };
 
 export function RoleCards({
@@ -137,12 +213,30 @@ export function RoleCards({
   onChanged,
   header,
   txUrl,
+  parentName,
+  defaultAgent,
 }: CardsProps) {
   const [cap, setCap] = useState("10");
   const [slippage, setSlippage] = useState("50");
   const [busy, setBusy] = useState<string | null>(null);
   const [riskOut, setRiskOut] = useState<Outcome>(null);
   const [ownerOut, setOwnerOut] = useState<Outcome>(null);
+  const [issueOut, setIssueOut] = useState<Outcome>(null);
+  const [form, setForm] = useState<IssueForm>({
+    label: "trader-2",
+    agent: defaultAgent,
+    cap: "100",
+    bps: "50",
+    duration: "7",
+    unit: "days",
+  });
+  const setField = <K extends keyof IssueForm>(key: K, value: IssueForm[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+  // The deployment record loads after the first render: prefill the agent once it is known.
+  useEffect(() => {
+    if (defaultAgent) setForm((f) => (f.agent ? f : { ...f, agent: defaultAgent }));
+  }, [defaultAgent]);
+  const formError = issueFormError(form);
 
   const run = async (key: string, set: (o: Outcome) => void, action: () => Promise<Outcome>) => {
     setBusy(key);
@@ -254,6 +348,95 @@ export function RoleCards({
         {!ownerGate.canSign && <p className="role-gate">{ownerGate.reason}</p>}
         <OutcomeLine outcome={ownerOut} txUrl={txUrl} />
       </div>
+
+      <div className="role owner issue">
+        <div className="role-head">
+          <h2 className="role-name">New agent</h2>
+          <span className="hint">signed by the owner</span>
+        </div>
+        <p className="role-hint">
+          Issue a subname with its own mandate: address record, daily cap, max slippage and expiry.
+          Two transactions, no new contract. An expired or cut name can be issued again.
+        </p>
+        <div className="issue-fields">
+          <label className="field">
+            <span>name</span>
+            <input
+              id="issue-label"
+              className="wide"
+              value={form.label}
+              onChange={(e) => setField("label", e.target.value.trim().toLowerCase())}
+              disabled={busy !== null || !ownerGate.canSign}
+            />
+            <span className="unit">.{parentName}</span>
+          </label>
+          <label className="field">
+            <span>agent</span>
+            <input
+              id="issue-agent"
+              className="wide addr"
+              value={form.agent}
+              onChange={(e) => setField("agent", e.target.value.trim())}
+              disabled={busy !== null || !ownerGate.canSign}
+              spellCheck={false}
+            />
+          </label>
+          <label className="field">
+            <span>daily cap</span>
+            <input
+              id="issue-cap"
+              value={form.cap}
+              onChange={(e) => setField("cap", e.target.value)}
+              inputMode="decimal"
+              disabled={busy !== null || !ownerGate.canSign}
+            />
+            <span className="unit">lUSD</span>
+          </label>
+          <label className="field">
+            <span>max slippage</span>
+            <input
+              id="issue-bps"
+              value={form.bps}
+              onChange={(e) => setField("bps", e.target.value)}
+              inputMode="numeric"
+              disabled={busy !== null || !ownerGate.canSign}
+            />
+            <span className="unit">bps</span>
+          </label>
+          <label className="field">
+            <span>mandate</span>
+            <input
+              id="issue-duration"
+              value={form.duration}
+              onChange={(e) => setField("duration", e.target.value)}
+              inputMode="decimal"
+              disabled={busy !== null || !ownerGate.canSign}
+            />
+            <select
+              id="issue-unit"
+              value={form.unit}
+              onChange={(e) => setField("unit", e.target.value as IssueForm["unit"])}
+              disabled={busy !== null || !ownerGate.canSign}
+            >
+              <option value="minutes">minutes</option>
+              <option value="days">days</option>
+            </select>
+          </label>
+        </div>
+        <div className="role-row">
+          <button
+            className="btn"
+            disabled={busy !== null || !ownerGate.canSign || formError !== null}
+            title={formError ?? undefined}
+            onClick={() => run("issue", setIssueOut, () => actions.issue(form))}
+          >
+            {busy === "issue" ? "Issuing…" : "Issue agent"}
+          </button>
+          {formError && ownerGate.canSign && <span className="hint">{formError}</span>}
+        </div>
+        {!ownerGate.canSign && <p className="role-gate">{ownerGate.reason}</p>}
+        <OutcomeLine outcome={issueOut} txUrl={txUrl} />
+      </div>
     </section>
   );
 }
@@ -274,6 +457,12 @@ function OutcomeLine({ outcome, txUrl }: { outcome: Outcome; txUrl?: string }) {
           ) : (
             shortHex(outcome.txHash, 10, 6)
           )}
+        </>
+      )}
+      {outcome.link && (
+        <>
+          {" "}
+          <a href={outcome.link.href}>{outcome.link.text}</a>
         </>
       )}
     </div>

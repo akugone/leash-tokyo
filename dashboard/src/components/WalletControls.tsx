@@ -6,19 +6,21 @@ import { sepolia as sepoliaNetwork } from "@reown/appkit/networks";
 import { createAppKit, useAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
-import { http, type Address } from "viem";
+import { http, type Abi, type Address } from "viem";
 import { sepolia } from "viem/chains";
 import { WagmiProvider, useAccount, usePublicClient, useSwitchChain, useWalletClient } from "wagmi";
 import {
   cutCall,
+  issueCalls,
+  registryWriteAbi,
   forbiddenCalls,
   forbiddenOutcome,
   slippageCall,
   tightenCall,
   type LeashTarget,
 } from "../lib/actions";
-import { shortHex, type Deployments } from "../lib/leash";
-import { RoleCards, type RoleActions, type RoleGate } from "./Controls";
+import { labelId, shortHex, type Deployments } from "../lib/leash";
+import { RoleCards, issuedOutcome, ttlSeconds, type RoleActions, type RoleGate } from "./Controls";
 
 const TX_URL = "https://sepolia.etherscan.io/tx/";
 
@@ -136,12 +138,11 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
     return { canSign: true };
   };
 
-  type Call =
-    ReturnType<typeof tightenCall> | ReturnType<typeof slippageCall> | ReturnType<typeof cutCall>;
+  type Call = { address: Address; abi: Abi; functionName: string; args: readonly unknown[] };
   const send = async (call: Call) => {
     if (!walletClient || !address || !publicClient) throw new Error("Connect a wallet first.");
     if (chainId !== sepolia.id) await switchChainAsync({ chainId: sepolia.id });
-    // The union of three typed calls is too wide for viem's inference, each one is valid on its own.
+    // Each builder in lib/actions returns a fully typed call; the common shape is too wide for viem's inference.
     const hash = await walletClient.writeContract({
       ...call,
       account: address,
@@ -199,6 +200,46 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
         txHash: r.hash,
       };
     },
+    issue: async (form) => {
+      if (!publicClient || !owner) throw new Error("No owner in the deployment record.");
+      const block = await publicClient.getBlock();
+      const expiry = await publicClient.readContract({
+        address: deployments.orgRegistry,
+        abi: registryWriteAbi,
+        functionName: "getExpiry",
+        args: [labelId(form.label)],
+      });
+      if (expiry > block.timestamp) {
+        throw new Error(
+          `${form.label}.${deployments.parentName} is already live. Cut it first, or pick another name.`,
+        );
+      }
+      const calls = issueCalls(
+        {
+          parentName: deployments.parentName,
+          registry: deployments.orgRegistry,
+          resolver: target.resolver,
+        },
+        {
+          label: form.label,
+          agent: form.agent as Address,
+          owner: owner as Address,
+          quote: deployments.quote as Address,
+          tokens: [deployments.token0, deployments.token1] as Address[],
+          capHuman: form.cap,
+          maxSlippageBps: form.bps,
+          ttlSeconds: ttlSeconds(form),
+        },
+        block.timestamp,
+      );
+      const registered = await send(calls.register);
+      if (!registered.ok)
+        return { tone: "bad", text: "register reverted on chain.", txHash: registered.hash };
+      const written = await send(calls.policy);
+      if (!written.ok)
+        return { tone: "bad", text: "Policy write reverted on chain.", txHash: written.hash };
+      return issuedOutcome(form, deployments.parentName, calls.expiry, written.hash);
+    },
   };
 
   const header = (
@@ -244,6 +285,8 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
       onChanged={onChanged}
       header={header}
       txUrl={TX_URL}
+      parentName={deployments.parentName}
+      defaultAgent={deployments.agent ?? ""}
     />
   );
 }

@@ -1,6 +1,14 @@
 // The human actions of the demo as plain contract calls, shared by the dev server (keys from .env) and the
 // browser (connected wallet). Each builder returns what viem's writeContract / simulateContract take.
-import { BaseError, parseAbi, parseUnits, type Address } from "viem";
+import {
+  BaseError,
+  encodeFunctionData,
+  getAddress,
+  parseAbi,
+  parseUnits,
+  zeroAddress,
+  type Address,
+} from "viem";
 import { dnsEncode, labelId } from "./leash";
 
 export const EAC_UNAUTHORIZED = "0x4b27a133"; // EACUnauthorizedAccountRoles(uint256,uint256,address)
@@ -9,9 +17,11 @@ export const resolverWriteAbi = parseAbi([
   "function setText(bytes name, string key, string value)",
   "function setAddress(bytes name, uint256 coinType, bytes addr)",
   "function resolve(bytes name, bytes data) view returns (bytes)",
+  "function multicall(bytes[] calls) returns (bytes[] results)",
 ]);
 
 export const registryWriteAbi = parseAbi([
+  "function register(string label, address owner, address subregistry, address resolver, uint256 roleBitmap, uint64 expiry) returns (uint256 tokenId)",
   "function unregister(uint256 anyId)",
   "function getExpiry(uint256 anyId) view returns (uint64)",
 ]);
@@ -106,4 +116,75 @@ export function forbiddenOutcome(what: string, err: unknown | null): { ok: boole
   const reason =
     sel === EAC_UNAUTHORIZED ? "EACUnauthorizedAccountRoles" : `reverted${sel ? ` (${sel})` : ""}`;
   return { ok: true, text: `PASS ${what} -> ${reason}` };
+}
+
+// ============ Issuing an agent ============
+
+/// `LeashOrgLib.agentTokenRoles()`: ROLE_UNREGISTER | ROLE_RENEW | ROLE_SET_RESOLVER, granted to the owner on the token.
+export const AGENT_TOKEN_ROLES = (1n << 12n) | (1n << 16n) | (1n << 24n);
+
+/// A new agent name and its whole policy, as the owner types it.
+export type AgentSpec = {
+  label: string;
+  /// Address the agent signs with, written as the name's ETH address record.
+  agent: Address;
+  /// Holds the subname token and the org roles.
+  owner: Address;
+  quote: Address;
+  tokens: Address[];
+  capHuman: string;
+  maxSlippageBps: string;
+  /// Seconds from now until the name expires and the hook stops accepting the agent.
+  ttlSeconds: bigint;
+};
+
+/// One DNS label: lowercase letters, digits and inner hyphens, 1 to 63 characters.
+export function agentLabelError(label: string): string | null {
+  if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) {
+    return "lowercase letters, digits and inner hyphens, up to 63 characters";
+  }
+  return null;
+}
+
+/// The two owner transactions of `script/ens/IssueAgent.s.sol`: register the subname on the org registry, then
+/// write its policy on the org resolver in one multicall. `now` is the chain time in seconds.
+export function issueCalls(
+  org: { parentName: string; registry: Address; resolver: Address },
+  spec: AgentSpec,
+  now: bigint,
+) {
+  const dnsName = name({ ...org, label: spec.label });
+  const expiry = now + spec.ttlSeconds;
+  const text = (key: string, value: string) =>
+    encodeFunctionData({
+      abi: resolverWriteAbi,
+      functionName: "setText",
+      args: [dnsName, key, value],
+    });
+  const records = [
+    encodeFunctionData({
+      abi: resolverWriteAbi,
+      functionName: "setAddress",
+      args: [dnsName, 60n, spec.agent],
+    }),
+    text("leash.quote", getAddress(spec.quote)),
+    text("leash.dailyNotional", parseUnits(spec.capHuman, 18).toString()),
+    text("leash.tokens", spec.tokens.map((t) => getAddress(t)).join(",")),
+    text("leash.maxSlippageBps", spec.maxSlippageBps),
+  ];
+  return {
+    expiry,
+    register: {
+      address: org.registry,
+      abi: registryWriteAbi,
+      functionName: "register",
+      args: [spec.label, spec.owner, zeroAddress, org.resolver, AGENT_TOKEN_ROLES, expiry],
+    } as const,
+    policy: {
+      address: org.resolver,
+      abi: resolverWriteAbi,
+      functionName: "multicall",
+      args: [records],
+    } as const,
+  };
 }

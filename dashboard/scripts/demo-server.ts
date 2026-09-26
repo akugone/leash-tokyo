@@ -10,6 +10,8 @@
  *                                     setText(leash.maxSlippageBps): must revert
  *   POST /api/demo/cut                owner: unregister(labelId) on the org registry
  *   POST /api/demo/slippage {bps}     owner: setText(leash.maxSlippageBps) on the org resolver, 1 to 9999
+ *   POST /api/demo/issue {label, agent, cap, bps, ttlSeconds}
+ *                                     owner: register a new (or expired) agent subname and write its policy
  *
  * Keys come from the repo root `.env` (RISK_MANAGER_PK, OWNER_PK) and never leave the dev server. The
  * static build has none of this: the dashboard then shows the feed and controls as unavailable.
@@ -18,6 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import {
+  isAddress,
   createPublicClient,
   createWalletClient,
   defineChain,
@@ -33,6 +36,8 @@ import {
   cutCall,
   forbiddenCalls,
   forbiddenOutcome,
+  agentLabelError,
+  issueCalls,
   registryWriteAbi,
   slippageCall,
   tightenCall,
@@ -218,6 +223,71 @@ async function cut() {
   };
 }
 
+/// Owner: the two transactions of script/ens/IssueAgent.s.sol, with the pool's quote and tokens.
+async function issue(input: {
+  label: string;
+  agent: Address;
+  cap: string;
+  bps: string;
+  ttlSeconds: bigint;
+}) {
+  const ctx = context();
+  const { account, client } = ctx.owner();
+  const fullName = `${input.label}.${ctx.d.parentName}`;
+  const block = await ctx.publicClient.getBlock();
+  const current = await ctx.publicClient.readContract({
+    address: ctx.registry,
+    abi: registryWriteAbi,
+    functionName: "getExpiry",
+    args: [labelId(input.label)],
+  });
+  if (current > block.timestamp)
+    throw new Error(`${fullName} is already live. Cut it first, or pick another name.`);
+  const calls = issueCalls(
+    { parentName: ctx.d.parentName, registry: ctx.registry, resolver: ctx.resolver },
+    {
+      label: input.label,
+      agent: input.agent,
+      owner: account.address,
+      quote: ctx.d.quote as Address,
+      tokens: [ctx.d.token0, ctx.d.token1] as Address[],
+      capHuman: input.cap,
+      maxSlippageBps: input.bps,
+      ttlSeconds: input.ttlSeconds,
+    },
+    block.timestamp,
+  );
+  push({
+    source: "owner",
+    kind: "intent",
+    text: `owner issues ${fullName}: agent ${input.agent}, cap ${input.cap} lUSD, max slippage ${input.bps} bps`,
+  });
+  const registerHash = await client.writeContract({
+    ...calls.register,
+    account,
+    chain: client.chain,
+  });
+  const registered = await ctx.publicClient.waitForTransactionReceipt({ hash: registerHash });
+  if (registered.status !== "success") {
+    push({
+      source: "owner",
+      kind: "revert",
+      text: `REVERTED register ${fullName}`,
+      txHash: registerHash,
+    });
+    return { txHash: registerHash, status: registered.status, expiry: calls.expiry.toString() };
+  }
+  const txHash = await client.writeContract({ ...calls.policy, account, chain: client.chain });
+  const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash: txHash });
+  push({
+    source: "owner",
+    kind: receipt.status === "success" ? "ok" : "revert",
+    text: `${receipt.status === "success" ? "OK" : "REVERTED"} block ${receipt.blockNumber}, ${fullName} is live until ${new Date(Number(calls.expiry) * 1000).toISOString()}`,
+    txHash,
+  });
+  return { txHash, registerHash, status: receipt.status, expiry: calls.expiry.toString() };
+}
+
 // ============ HTTP plumbing ============
 
 function json(res: ServerResponse, status: number, body: unknown) {
@@ -290,6 +360,26 @@ export function leashDemoPlugin(): Plugin {
           }
           if (url.pathname === "/api/demo/forbid") return json(res, 200, await forbid());
           if (url.pathname === "/api/demo/cut") return json(res, 200, await cut());
+          if (url.pathname === "/api/demo/issue") {
+            const body = await readBody(req);
+            const label = String(body.label ?? "").trim();
+            const agent = String(body.agent ?? "").trim();
+            const cap = String(body.cap ?? "").trim();
+            const bps = String(body.bps ?? "").trim();
+            const ttl = String(body.ttlSeconds ?? "").trim();
+            const invalid =
+              agentLabelError(label) ??
+              (isAddress(agent) ? null : "agent is not an address") ??
+              (/^\d+(\.\d+)?$/.test(cap) ? null : "cap must be a number") ??
+              slippageInputError(bps) ??
+              (/^\d+$/.test(ttl) && BigInt(ttl) >= 60n ? null : "ttlSeconds must be at least 60");
+            if (invalid) return json(res, 400, { error: invalid });
+            return json(
+              res,
+              200,
+              await issue({ label, agent: agent as Address, cap, bps, ttlSeconds: BigInt(ttl) }),
+            );
+          }
           return json(res, 404, { error: "unknown demo endpoint" });
         } catch (err) {
           const message = err instanceof Error ? err.message.split("\n")[0] : String(err);
