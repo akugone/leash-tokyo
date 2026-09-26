@@ -24,9 +24,14 @@ export function LeashBar({ cap, spent, left, expiry, now, status, symbol }: Prop
   const pct = Math.round(frac * 100);
   const cut = status === "revoked";
   const remainingToday = cut ? 0n : (left ?? remaining(cap, spent));
+  // A risk manager can lower the cap under what was already spent: say so instead of a flat "100%".
+  const over = !cut && cap !== null && spent !== null && spent > cap ? spent - cap : null;
 
   return (
-    <section className={`leash ${cut ? "cut" : ""} tone-${status}`} aria-label="leash">
+    <section
+      className={`leash ${cut ? "cut" : ""} ${over !== null ? "over" : ""} tone-${status}`}
+      aria-label="leash"
+    >
       <div className="leash-top">
         <div className="leash-figure">
           {spent !== null && cap !== null ? (
@@ -79,6 +84,16 @@ export function LeashBar({ cap, spent, left, expiry, now, status, symbol }: Prop
       <div className="leash-caption">
         {cut ? (
           <span className="danger">Leash cut. The hook reverts every swap with LeashRevoked.</span>
+        ) : over !== null ? (
+          <>
+            <span className="danger">
+              Over the cap by {formatAmount(over)} {symbol}. The next swap reverts with
+              DailyCapExceeded.
+            </span>
+            <span>
+              <b className="num">0 {symbol}</b> left today
+            </span>
+          </>
         ) : (
           <>
             <span>

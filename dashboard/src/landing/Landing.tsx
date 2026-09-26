@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { Logo } from "../components/Logo";
 import { Icon, type IconName } from "./icons";
 
 const REPO = "https://github.com/akugone/leash-tokyo";
@@ -53,7 +54,7 @@ export function Landing() {
       <footer className="lp-footer">
         <div className="lp-wrap lp-footer-row">
           <span className="lp-brand">
-            <Logo /> Leash
+            <Logo className="lp-logo" /> Leash
           </span>
           <span className="lp-muted">ENS-native permissions for autonomous traders.</span>
           <a href={REPO}>GitHub</a>
@@ -63,22 +64,13 @@ export function Landing() {
   );
 }
 
-function Logo() {
-  return (
-    <svg className="lp-logo" viewBox="0 0 16 16" aria-hidden="true">
-      <rect width="16" height="16" rx="3.5" fill="currentColor" />
-      <circle cx="4.5" cy="8" r="2" fill="var(--lp-bg)" />
-      <rect x="6.5" y="7.2" width="7" height="1.6" rx="0.8" fill="var(--lp-bg)" />
-    </svg>
-  );
-}
 
 function Nav() {
   return (
     <header className="lp-nav">
       <div className="lp-wrap lp-nav-row">
         <a className="lp-brand" href="/">
-          <Logo /> Leash
+          <Logo className="lp-logo" /> Leash
         </a>
         <nav className="lp-links" aria-label="Sections">
           <a href="#what">What</a>

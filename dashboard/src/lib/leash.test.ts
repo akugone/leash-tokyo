@@ -146,6 +146,8 @@ describe("formatting", () => {
     expect(formatAmount(1_500_000_000_000_000_000n)).toBe("1.5");
     expect(formatAmount(123_456_789_012_345_678n)).toBe("0.1234");
     expect(formatAmount(0n)).toBe("0");
+    expect(formatAmount(25_000_000n)).toBe("<0.0001");
+    expect(formatAmount(100_000_000_000_000n)).toBe("0.0001");
   });
   test("formatCountdown", () => {
     expect(formatCountdown(0n)).toBe("expired");
