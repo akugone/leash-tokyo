@@ -140,6 +140,7 @@ code {
 
 .status-revoked .logo {
   color: var(--red);
+  --logo-tag: var(--logo-cut);
 }
 
 .crumb {
