@@ -25,7 +25,7 @@ G=$'\033[1;32m'; B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; R=$'\033[0m'
 clear
 printf '%s' "${D}"
 printf '  Leash · agent terminal\n'
-printf '  Claude Code as %s.%s, tools: leash_policy, leash_swap\n' "${AGENT_LABEL:-trader-1}" "${PARENT_LABEL:-leashdemo}.eth"
+printf '  Claude Code as %s.%s, tools: leash_policy, leash_swap\n' "${AGENT_LABEL:-trader-1}" "${PARENT_LABEL:-leash}.eth"
 printf '  The agent holds the trader key. It cannot change its own limits.\n'
 printf '%s\n' "${R}"
 
