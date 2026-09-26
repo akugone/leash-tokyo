@@ -390,8 +390,7 @@ code {
   gap: 12px;
   padding: 16px 20px;
   background: var(--lp-bg-alt);
-  border-radius: 8px;
-  max-width: 820px;
+  border-radius: 10px;
 }
 
 .lp-callout svg {
