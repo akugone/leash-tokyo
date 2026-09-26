@@ -10,7 +10,7 @@ A Uniswap v4 hook that gates every swap on the trading agent's ENSv2 subname and
 
 The org is **`leash.eth`** on the ENSv2 beta, and its agent is **`trader-1.leash.eth`**: a daily cap of 250 lUSD, lUSD and lETH allowed, max slippage of 1% (100 bps), a mandate that ends on 2026-10-26.
 
-Contract addresses and how to check it yourself: [Deployed on Sepolia](#deployed-on-sepolia).
+Contract addresses and how to check it yourself: [Deployed on Sepolia](#deployed-on-sepolia). The Uniswap v4 hook, line by line: [Where the Uniswap v4 integration lives](#where-the-uniswap-v4-integration-lives).
 
 ---
 
@@ -150,6 +150,28 @@ Leash is two halves that need each other: ENSv2 says who may trade and within wh
 | `afterSwap` and `BalanceDelta` | The daily cap counts the real settled quote token amount, not a quoted or claimed one |
 
 Strip ENS out and the policy has nowhere to live: the design collapses into a bespoke allowlist contract. Strip Uniswap v4 out and nothing enforces the policy at the moment of the trade: you are back to a trusted router, or a bot promising to behave. Leash passes both tests.
+
+### Where the Uniswap v4 integration lives
+
+Links are pinned to a commit, so the line numbers stay exact.
+
+| What | Code |
+|---|---|
+| Hook permissions: `beforeSwap` and `afterSwap` only | [`src/LeashHook.sol#L189-L206`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/src/LeashHook.sol#L189-L206) |
+| `beforeSwap`: decode `hookData`, name alive, signer is the `addr` record, nonce, deadline, intent matches the swap, token allowlist, price limit | [`src/LeashHook.sol#L232-L293`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/src/LeashHook.sol#L232-L293) |
+| `afterSwap`: the quote token amount from `BalanceDelta` counted against the daily cap | [`src/LeashHook.sol#L296-L327`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/src/LeashHook.sol#L296-L327) |
+| Price limit bound from the pool's `slot0` (`StateLibrary.getSlot0`) | [`src/LeashHook.sol#L166-L179`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/src/LeashHook.sol#L166-L179) |
+| Transient storage handover between the two callbacks | [`src/LeashHook.sol#L355-L365`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/src/LeashHook.sol#L355-L365) |
+| `hookData` layout: label, EIP-712 `SwapIntent`, signature | [`src/libraries/LeashIntentLib.sol#L63-L79`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/src/libraries/LeashIntentLib.sol#L63-L79) |
+| Vault swapping through the v4 router, only on Leash pools, `trySwap` recording refusals | [`src/LeashVault.sol#L61-L113`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/src/LeashVault.sol#L61-L113) |
+| Hook address mined with `HookMiner`, deployed with CREATE2 | [`script/DeployHook.s.sol#L22-L35`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/script/DeployHook.s.sol#L22-L35) |
+| Pool initialised with the hook, liquidity added | [`script/SetupPool.s.sol`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/script/SetupPool.s.sol) |
+| Agent side: sign the intent, build `hookData` and the price limit | [`agent/src/leash.ts#L207-L218`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/agent/src/leash.ts#L207-L218) |
+| Decoding the PoolManager's `WrappedError` around hook reverts | [`agent/src/errors.ts#L31-L69`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/agent/src/errors.ts#L31-L69) |
+| Tests with v4-core `Deployers` | [`test/LeashHook.t.sol`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/test/LeashHook.t.sol) |
+| The same scenarios against the real Sepolia PoolManager and ENSv2 | [`test/fork/LeashHook.fork.t.sol`](https://github.com/akugone/leash-tokyo/blob/8dadb8c/test/fork/LeashHook.fork.t.sol) |
+
+Developer feedback on Uniswap v4 and ENSv2: [FEEDBACK.md](FEEDBACK.md).
 
 ## Trust model
 
