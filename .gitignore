@@ -11,6 +11,8 @@ node_modules/
 # Env
 .env
 .env.*
+# Public build settings (the hosted dashboard RPC), no secrets.
+!dashboard/.env.production
 !.env.example
 
 # OS / editors

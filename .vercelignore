@@ -1,0 +1,9 @@
+# Upload only what the dashboard build needs: the app and the Sepolia deployment record.
+/*
+!/dashboard
+!/deployments
+!/vercel.json
+/dashboard/node_modules
+/dashboard/dist
+/dashboard/public/deployments.json
+/deployments/anvil.json
