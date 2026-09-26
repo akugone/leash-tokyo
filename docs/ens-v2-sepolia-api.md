@@ -80,7 +80,9 @@ function multicall(bytes[] calls) external returns (bytes[]);
 
 - `name` is the DNS-encoded full name, e.g. `\x08trader-1\x05leash\x03eth\x00`. The resolver derives `node = namehash(name)` itself.
 - `grantRoles(...)` is disabled and always reverts. Use `grantSetterRoles(abi.encodeCall(setText, ("", "leash.dailyNotional", "")), riskManager)`. The resolver decodes the calldata, derives `resource = keccak256(bytes(key))` and grants `ROLE_SET_TEXT` on it. The caller needs `ROLE_SET_TEXT_ADMIN` on that resource or on root.
-- **Scoping is per record key, not per name.** A risk-manager with `ROLE_SET_TEXT` on `resource("leash.dailyNotional")` can set that key on every name served by this resolver. One resolver per org means the risk desk manages every agent's cap, which is the intended model. It still cannot touch `addr`, other keys, or the registry.
+- **Scoping is per record key, not per name.** A risk-manager with `ROLE_SET_TEXT` on `resource("leash.dailyNotional")` can set that key on every name served by this resolver. Leash therefore gives every agent its own resolver: the same grant then covers that one agent. It still cannot touch `addr`, other keys, or the registry.
+- **`initialize(grants, calls)` runs setters without checks, but cannot grant scoped roles.** Records passed in `calls` are written in the deployment transaction, which is how Leash creates an agent's resolver with its policy in one transaction. A `grantSetterRoles` call in `calls` reverts `EACCannotGrantRoles`: the resolver sees the factory as the caller. Grant scoped roles afterwards, from the owner (one `multicall`).
+- **Re-pointing a name keeps its token and expiry.** `setResolver(labelId, resolver)` needs `ROLE_SET_RESOLVER` on the token or root and emits `ResolverUpdated(tokenId, resolver, sender)`, as `register` does. Leash uses it to move an agent from a shared resolver to its own, and the dashboard reads these events to find the resolver of a name that has since been cut (`getResolver` then answers zero).
 - Reads go through `resolve`. The `bytes32 node` argument inside `data` is ignored:
 
 ```solidity
@@ -96,7 +98,7 @@ address agent = abi.decode(ret, (address));
 - **Anvil's default accounts are EIP-7702 delegated on Sepolia.** Their `code` is `0xef0100...` (sweeper bots). `ETHRegistry.register` mints an ERC1155 to the owner, the delegated code does not answer `onERC1155Received`, and the registration reverts with empty data. Use fresh keys (`cast wallet new`) for every account that receives a name; `script/ens/EnsScriptBase.s.sol` refuses delegated owners up front.
 - **Registration price** for `leashdemo`, 28 days, paid in MockUSDC: 613701 raw units (0.61 USDC), no premium.
 - `VerifiableFactory.deployProxy` is CREATE2 on `(msg.sender, salt)`: running a deploy script twice from the same owner on the same chain reverts. Change the salt or the owner.
-- Gas measured on the fork: register parent about 362k (commit + reveal), org registry 235k, org resolver 178k, issue agent with four records 510k, two `grantSetterRoles` 175k.
+- Gas measured on the fork (26 September 2026): register parent about 430k (commit + reveal), org registry 211k, issue agent 659k (its own resolver deployed with four records in `initialize`, then `register`), risk manager grant 122k (one `multicall` of two `grantSetterRoles`).
 
 ## Role bitmaps
 

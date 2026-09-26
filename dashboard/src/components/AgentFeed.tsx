@@ -31,6 +31,7 @@ const CHAIN_SOURCE: Record<ActivityKind, string> = {
   refused: "agent",
   policy: "system",
   issued: "owner",
+  resolver: "owner",
   cut: "owner",
   funded: "owner",
 };
@@ -40,6 +41,7 @@ const CHAIN_TONE: Record<ActivityKind, string> = {
   refused: "revert",
   policy: "policy",
   issued: "ok",
+  resolver: "policy",
   cut: "cut",
   funded: "ok",
 };

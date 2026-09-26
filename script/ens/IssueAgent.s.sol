@@ -6,15 +6,21 @@ import {console2} from "forge-std/console2.sol";
 import {IPermissionedRegistry} from "../../src/interfaces/ens/IPermissionedRegistry.sol";
 import {IPermissionedResolver} from "../../src/interfaces/ens/IPermissionedResolver.sol";
 import {EnsNameLib} from "../../src/libraries/EnsNameLib.sol";
+import {ResolverRoles} from "../../src/libraries/EnsRoles.sol";
 import {LeashEnsLib} from "../../src/libraries/LeashEnsLib.sol";
+import {SepoliaAddresses} from "../Addresses.sol";
 import {EnsScriptBase} from "./EnsScriptBase.s.sol";
 import {LeashOrgLib} from "./LeashOrgLib.sol";
 
-/// @notice Issue an agent subname under the org registry and write its policy records (ticket L-06).
-/// @dev The subname token is owned by the org owner, never by the agent key. The agent only appears in the
+/// @notice Issue an agent subname with its own Permissioned Resolver holding its policy (ticket L-06).
+/// @dev Two owner transactions: `VerifiableFactory.deployProxy` creates the agent's resolver and writes its policy
+///      in `initialize`, then the org registry registers the label pointing to it. Every agent owns its data: no
+///      other agent's records live in that resolver, and a role granted on it covers this agent only.
+///      The subname token is owned by the org owner, never by the agent key. The agent only appears in the
 ///      ETH address record. Policy inputs: `quote` from the JSON (`quote`) or env `QUOTE`; tokens from the
 ///      JSON (`token0`, `token1`) or env `TOKEN0`/`TOKEN1`; cap from env `DAILY_CAP` (default 250e18); slippage
-///      bound from env `MAX_SLIPPAGE_BPS` (default 100, i.e. 1%).
+///      bound from env `MAX_SLIPPAGE_BPS` (default 100, i.e. 1%). The risk manager is granted separately, by
+///      `GrantRiskManager`, so an agent can also run with no risk manager at all.
 ///      Entrypoints: `run()` uses `AGENT_LABEL` (default `trader-1`) and `AGENT_TTL` (default 7 days);
 ///      `issue(string,uint64)` takes the label and ttl explicitly, e.g. `--sig "issue(string,uint64)" trader-2 180`.
 contract IssueAgent is EnsScriptBase {
@@ -36,35 +42,46 @@ contract IssueAgent is EnsScriptBase {
         address owner = _owner();
         address agent = _agent();
         IPermissionedRegistry orgRegistry = _orgRegistry();
-        IPermissionedResolver orgResolver = _orgResolver();
         (address quote, address[] memory tokens, uint256 cap) = _policyInputs();
         uint256 maxSlippageBps = vm.envOr("MAX_SLIPPAGE_BPS", DEFAULT_MAX_SLIPPAGE_BPS);
         require(maxSlippageBps < 10_000, "IssueAgent: MAX_SLIPPAGE_BPS must be below 10000");
 
         bytes memory dnsName = EnsNameLib.dnsEncode(label, EnsNameLib.dnsEncodeName(_parentName()));
         uint64 expiry = uint64(block.timestamp) + ttl;
+        bytes[] memory records = LeashOrgLib.policyCalls(dnsName, agent, quote, cap, tokens, maxSlippageBps);
 
         vm.startBroadcast(_ownerPk());
+        address resolver = FACTORY.deployProxy(
+            SepoliaAddresses.ENS_PERMISSIONED_RESOLVER_IMPL,
+            LeashOrgLib.agentResolverSalt(label, expiry),
+            LeashOrgLib.agentResolverInitData(owner, records)
+        );
         uint256 tokenId =
-            orgRegistry.register(label, owner, address(0), address(orgResolver), LeashOrgLib.agentTokenRoles(), expiry);
-        orgResolver.multicall(LeashOrgLib.policyCalls(dnsName, agent, quote, cap, tokens, maxSlippageBps));
+            orgRegistry.register(label, owner, address(0), resolver, LeashOrgLib.agentTokenRoles(), expiry);
         vm.stopBroadcast();
 
+        IPermissionedResolver agentResolver = IPermissionedResolver(resolver);
         require(orgRegistry.getExpiry(EnsNameLib.labelId(label)) > block.timestamp, "IssueAgent: not live");
-        require(orgRegistry.getResolver(label) == address(orgResolver), "IssueAgent: resolver mismatch");
-        require(LeashEnsLib.readAddr(orgResolver, dnsName) == agent, "IssueAgent: addr record mismatch");
+        require(orgRegistry.getResolver(label) == resolver, "IssueAgent: resolver mismatch");
         require(
-            keccak256(bytes(LeashEnsLib.readText(orgResolver, dnsName, LeashOrgLib.KEY_DAILY_NOTIONAL)))
+            agentResolver.hasRootRoles(ResolverRoles.ORG_OWNER_ROOT_ROLES, owner),
+            "IssueAgent: owner missing root roles"
+        );
+        require(LeashEnsLib.readAddr(agentResolver, dnsName) == agent, "IssueAgent: addr record mismatch");
+        require(
+            keccak256(bytes(LeashEnsLib.readText(agentResolver, dnsName, LeashOrgLib.KEY_DAILY_NOTIONAL)))
                 == keccak256(bytes(LeashOrgLib.capString(cap))),
             "IssueAgent: cap record mismatch"
         );
         require(
-            keccak256(bytes(LeashEnsLib.readText(orgResolver, dnsName, LeashOrgLib.KEY_MAX_SLIPPAGE_BPS)))
+            keccak256(bytes(LeashEnsLib.readText(agentResolver, dnsName, LeashOrgLib.KEY_MAX_SLIPPAGE_BPS)))
                 == keccak256(bytes(LeashOrgLib.capString(maxSlippageBps))),
             "IssueAgent: slippage record mismatch"
         );
+        if (keccak256(bytes(label)) == keccak256(bytes(_agentLabel()))) _writeAddress("agentResolver", resolver);
 
         console2.log("IssueAgent: issued", string.concat(label, ".", _parentName()));
+        _logAddress("IssueAgent: own resolver", resolver);
         console2.log("IssueAgent: tokenId", tokenId);
         console2.log("IssueAgent: expiry", expiry);
         console2.log("IssueAgent: node", vm.toString(EnsNameLib.namehash(string.concat(label, ".", _parentName()))));

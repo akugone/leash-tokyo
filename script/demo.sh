@@ -4,12 +4,12 @@
 # Usage:
 #   script/demo.sh anvil     # start anvil forking Sepolia a few blocks behind head, or at FORK_BLOCK (foreground)
 #   script/demo.sh fund      # give the three demo keys ETH on the fork (setup does it too)
-#   script/demo.sh setup     # act 0: register parent name, deploy registry/resolver/hook/pool, issue agent, grant risk-manager,
-#                            #   then sync the record to the dashboard and clear its activity feed
+#   script/demo.sh setup     # act 0: register parent name, deploy registry/hook/pool, issue the agent with its own
+#                            #   resolver, grant risk-manager on it, then sync the record to the dashboard and clear its feed
 #   script/demo.sh tighten   # act 4: risk-manager lowers the cap to NEW_CAP (default 1)
 #   script/demo.sh forbid    # act 4: risk-manager tries to revoke / re-point the agent (must fail)
 #   script/demo.sh cut       # act 5: owner cuts the leash
-#   script/demo.sh short     # bonus: issue trader-2 with a 3 minute expiry
+#   script/demo.sh short     # bonus: issue trader-2 with a 3 minute expiry, its own resolver, no risk-manager
 #   script/demo.sh agent     # open Claude Code as the trading agent (MCP tools leash_policy, leash_swap)
 #                            #   LEASH_RECORD_REFUSALS=1: send refused swaps anyway, recorded on chain (agent pays gas)
 #   script/demo.sh dashboard # dashboard dev server for this network, with the demo controls and the feed
@@ -23,7 +23,9 @@
 #   LEASH_NETWORK=sepolia script/demo.sh verify   # verify hook, vault and tokens on Etherscan (ETHERSCAN_API_KEY)
 #
 # Either network:
-#   script/demo.sh migrate-vault   # deploy a fresh LeashVault and move the pool tokens over (owner signs)
+#   script/demo.sh migrate-vault     # deploy a fresh LeashVault and move the pool tokens over (owner signs)
+#   script/demo.sh migrate-resolver  # move a live agent (LABEL, default agentLabel) off a shared resolver onto its
+#                                    #   own, records copied as they are, then grant the risk-manager on it
 #
 # Requires: foundry, a .env with SEPOLIA_RPC_URL, OWNER_PK, RISK_MANAGER_PK, AGENT_PK (see .env.example).
 set -euo pipefail
@@ -101,24 +103,22 @@ fund)
 setup)
     only_on anvil setup
     fund_all
-    echo "== 1/7 register parent name: commit"
+    echo "== 1/6 register parent name: commit"
     script script/ens/RegisterParent.s.sol --sig 'commit()'
     echo "== wait for MIN_COMMITMENT_AGE (60s) on the fork"
     cast rpc --rpc-url "$RPC" evm_increaseTime 61 >/dev/null
     cast rpc --rpc-url "$RPC" evm_mine >/dev/null
-    echo "== 1/7 register parent name: reveal"
+    echo "== 1/6 register parent name: reveal"
     script script/ens/RegisterParent.s.sol --sig 'reveal()'
-    echo "== 2/7 deploy org registry"
+    echo "== 2/6 deploy org registry"
     script script/ens/DeployOrgRegistry.s.sol
-    echo "== 3/7 deploy org resolver"
-    script script/ens/DeployOrgResolver.s.sol
-    echo "== 4/7 deploy hook"
+    echo "== 3/6 deploy hook"
     script script/DeployHook.s.sol
-    echo "== 5/7 tokens, pool, liquidity"
+    echo "== 4/6 tokens, pool, liquidity"
     script script/SetupPool.s.sol
-    echo "== 6/7 issue agent subname and policy"
+    echo "== 5/6 issue agent subname: its own resolver, holding its policy"
     script script/ens/IssueAgent.s.sol
-    echo "== 7/7 grant risk-manager"
+    echo "== 6/6 grant risk-manager on the agent's resolver"
     script script/ens/GrantRiskManager.s.sol
     echo "== done"
     cat "$LEASH_DEPLOYMENTS_FILE"
@@ -144,23 +144,21 @@ deploy)
         addr=$(cast wallet address --private-key "$pk")
         echo "$addr: $(cast balance "$addr" --ether --rpc-url "$RPC") ETH"
     done
-    echo "== 1/7 register ${PARENT_LABEL:-leash}.eth for $PARENT_DURATION s: commit"
+    echo "== 1/6 register ${PARENT_LABEL:-leash}.eth for $PARENT_DURATION s: commit"
     live_script script/ens/RegisterParent.s.sol --sig 'commit()'
     echo "== wait for MIN_COMMITMENT_AGE (60 s) on chain"
     sleep 75
-    echo "== 1/7 register parent name: reveal"
+    echo "== 1/6 register parent name: reveal"
     live_script script/ens/RegisterParent.s.sol --sig 'reveal()'
-    echo "== 2/7 deploy org registry"
+    echo "== 2/6 deploy org registry"
     live_script script/ens/DeployOrgRegistry.s.sol
-    echo "== 3/7 deploy org resolver"
-    live_script script/ens/DeployOrgResolver.s.sol
-    echo "== 4/7 deploy hook"
+    echo "== 3/6 deploy hook"
     live_script script/DeployHook.s.sol
-    echo "== 5/7 tokens, pool, liquidity, vault"
+    echo "== 4/6 tokens, pool, liquidity, vault"
     live_script script/SetupPool.s.sol
-    echo "== 6/7 issue agent subname and policy, $AGENT_TTL s"
+    echo "== 5/6 issue agent subname with its own resolver, $AGENT_TTL s"
     live_script script/ens/IssueAgent.s.sol
-    echo "== 7/7 grant risk-manager"
+    echo "== 6/6 grant risk-manager on the agent's resolver"
     live_script script/ens/GrantRiskManager.s.sol
     echo "== done, commit $LEASH_DEPLOYMENTS_FILE"
     cat "$LEASH_DEPLOYMENTS_FILE"
@@ -188,6 +186,14 @@ verify)
 migrate-vault)
     if [ "$NETWORK" = sepolia ]; then live_script script/MigrateVault.s.sol; else script script/MigrateVault.s.sol; fi
     jq '{vault, vaultPrevious}' "$LEASH_DEPLOYMENTS_FILE"
+    ;;
+migrate-resolver)
+    label="${LABEL:-$(jq -r .agentLabel "$LEASH_DEPLOYMENTS_FILE")}"
+    run_script() { if [ "$NETWORK" = sepolia ]; then live_script "$@"; else script "$@"; fi; }
+    echo "== 1/2 $label: own resolver, records copied, name re-pointed"
+    run_script script/ens/MigrateAgentResolver.s.sol --sig 'migrate(string)' "$label"
+    echo "== 2/2 grant risk-manager on $label's resolver"
+    run_script script/ens/GrantRiskManager.s.sol --sig 'grant(string)' "$label"
     ;;
 dashboard)
     # Local dev server: the browser and the demo controls both use this network's RPC and record.

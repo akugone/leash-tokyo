@@ -2,14 +2,25 @@
 // browser (connected wallet). Each builder returns what viem's writeContract / simulateContract take.
 import {
   BaseError,
+  encodeAbiParameters,
   encodeFunctionData,
   getAddress,
+  isAddressEqual,
+  keccak256,
   parseAbi,
+  parseEventLogs,
   parseUnits,
   zeroAddress,
   type Address,
+  type Log,
+  type PublicClient,
 } from "viem";
-import { dnsEncode, labelId } from "./leash";
+import {
+  dnsEncode,
+  ENS_PERMISSIONED_RESOLVER_IMPL,
+  ENS_VERIFIABLE_FACTORY,
+  labelId,
+} from "./leash";
 
 export const EAC_UNAUTHORIZED = "0x4b27a133"; // EACUnauthorizedAccountRoles(uint256,uint256,address)
 
@@ -18,15 +29,41 @@ export const resolverWriteAbi = parseAbi([
   "function setAddress(bytes name, uint256 coinType, bytes addr)",
   "function resolve(bytes name, bytes data) view returns (bytes)",
   "function multicall(bytes[] calls) returns (bytes[] results)",
+  "function initialize((address account, uint256 roleBitmap)[] grants, bytes[] calls)",
+  "function grantSetterRoles(bytes setter, address account) returns (bool)",
+]);
+
+export const factoryAbi = parseAbi([
+  "function deployProxy(address implementation, uint256 salt, bytes data) returns (address proxy)",
+  "event ProxyDeployed(address indexed sender, address indexed proxyAddress, uint256 salt, address implementation)",
 ]);
 
 export const registryWriteAbi = parseAbi([
   "function register(string label, address owner, address subregistry, address resolver, uint256 roleBitmap, uint64 expiry) returns (uint256 tokenId)",
   "function unregister(uint256 anyId)",
   "function getExpiry(uint256 anyId) view returns (uint64)",
+  "function getResolver(string label) view returns (address)",
 ]);
 
-/// Where the agent's name lives: its label under `parentName`, the org registry and resolver.
+/// The agent's own resolver, read from the registry when the action runs, so a write never lands on another
+/// agent's resolver. Throws once the name is cut or expired: the registry then answers zero.
+export async function liveResolver(
+  client: Pick<PublicClient, "readContract">,
+  registry: Address,
+  label: string,
+): Promise<Address> {
+  const resolver = await client.readContract({
+    address: registry,
+    abi: registryWriteAbi,
+    functionName: "getResolver",
+    args: [label],
+  });
+  if (resolver === zeroAddress)
+    throw new Error(`${label} has no resolver: the name is cut or expired.`);
+  return resolver;
+}
+
+/// Where the agent's name lives: its label under `parentName`, the org registry, and the agent's own resolver.
 export type LeashTarget = {
   label: string;
   parentName: string;
@@ -34,7 +71,7 @@ export type LeashTarget = {
   resolver: Address;
 };
 
-function name(t: LeashTarget) {
+function name(t: Pick<LeashTarget, "label" | "parentName">) {
   return dnsEncode(`${t.label}.${t.parentName}`);
 }
 
@@ -123,6 +160,13 @@ export function forbiddenOutcome(what: string, err: unknown | null): { ok: boole
 /// `LeashOrgLib.agentTokenRoles()`: ROLE_UNREGISTER | ROLE_RENEW | ROLE_SET_RESOLVER, granted to the owner on the token.
 export const AGENT_TOKEN_ROLES = (1n << 12n) | (1n << 16n) | (1n << 24n);
 
+/// `ResolverRoles.ORG_OWNER_ROOT_ROLES`: ROLE_SET_ADDRESS and ROLE_SET_TEXT with their admin bits, on the agent's
+/// own resolver, so the owner writes every record and delegates single keys.
+export const RESOLVER_OWNER_ROOT_ROLES = (1n << 0n) | (1n << 128n) | (1n << 4n) | (1n << 132n);
+
+/// Keys the risk manager may write, `LeashOrgLib.riskManagerKeys()`.
+export const RISK_MANAGER_KEYS = ["leash.dailyNotional", "leash.tokens"] as const;
+
 /// A new agent name and its whole policy, as the owner types it.
 export type AgentSpec = {
   label: string;
@@ -146,14 +190,27 @@ export function agentLabelError(label: string): string | null {
   return null;
 }
 
-/// The two owner transactions of `script/ens/IssueAgent.s.sol`: register the subname on the org registry, then
-/// write its policy on the org resolver in one multicall. `now` is the chain time in seconds.
+/// `LeashOrgLib.agentResolverSalt`: a re-issued name gets a fresh resolver, the factory refuses a reused salt.
+export function agentResolverSalt(label: string, expiry: bigint): bigint {
+  return BigInt(
+    keccak256(
+      encodeAbiParameters(
+        [{ type: "string" }, { type: "string" }, { type: "uint64" }],
+        ["leash.agent-resolver.v1", label, expiry],
+      ),
+    ),
+  );
+}
+
+/// The owner transactions of `script/ens/IssueAgent.s.sol` (and `GrantRiskManager`): deploy the agent's own
+/// resolver with its policy written in `initialize`, register the subname pointing to it, then optionally let the
+/// risk manager edit its cap and tokens, on that resolver only. `now` is the chain time in seconds.
 export function issueCalls(
-  org: { parentName: string; registry: Address; resolver: Address },
+  org: { parentName: string; registry: Address },
   spec: AgentSpec,
   now: bigint,
 ) {
-  const dnsName = name({ ...org, label: spec.label });
+  const dnsName = name({ label: spec.label, parentName: org.parentName });
   const expiry = now + spec.ttlSeconds;
   const text = (key: string, value: string) =>
     encodeFunctionData({
@@ -172,21 +229,59 @@ export function issueCalls(
     text("leash.tokens", spec.tokens.map((t) => getAddress(t)).join(",")),
     text("leash.maxSlippageBps", spec.maxSlippageBps),
   ];
+  const init = encodeFunctionData({
+    abi: resolverWriteAbi,
+    functionName: "initialize",
+    args: [[{ account: spec.owner, roleBitmap: RESOLVER_OWNER_ROOT_ROLES }], records],
+  });
   return {
     expiry,
-    register: {
-      address: org.registry,
-      abi: registryWriteAbi,
-      functionName: "register",
-      args: [spec.label, spec.owner, zeroAddress, org.resolver, AGENT_TOKEN_ROLES, expiry],
+    deployResolver: {
+      address: ENS_VERIFIABLE_FACTORY,
+      abi: factoryAbi,
+      functionName: "deployProxy",
+      args: [ENS_PERMISSIONED_RESOLVER_IMPL, agentResolverSalt(spec.label, expiry), init],
     } as const,
-    policy: {
-      address: org.resolver,
-      abi: resolverWriteAbi,
-      functionName: "multicall",
-      args: [records],
-    } as const,
+    register: (resolver: Address) =>
+      ({
+        address: org.registry,
+        abi: registryWriteAbi,
+        functionName: "register",
+        args: [spec.label, spec.owner, zeroAddress, resolver, AGENT_TOKEN_ROLES, expiry],
+      }) as const,
   };
+}
+
+/// Owner: `ROLE_SET_TEXT` on `leash.dailyNotional` and `leash.tokens` for `riskManager`, on one agent's resolver.
+export function grantRiskManagerCall(resolver: Address, riskManager: Address) {
+  const setters = RISK_MANAGER_KEYS.map((key) =>
+    encodeFunctionData({ abi: resolverWriteAbi, functionName: "setText", args: ["0x", key, ""] }),
+  );
+  return {
+    address: resolver,
+    abi: resolverWriteAbi,
+    functionName: "multicall",
+    args: [
+      setters.map((setter) =>
+        encodeFunctionData({
+          abi: resolverWriteAbi,
+          functionName: "grantSetterRoles",
+          args: [setter, riskManager],
+        }),
+      ),
+    ],
+  } as const;
+}
+
+/// The resolver `deployProxy` created, from its receipt's `ProxyDeployed` event.
+export function deployedResolver(logs: Log[]): Address {
+  const deployed = parseEventLogs({ abi: factoryAbi, eventName: "ProxyDeployed", logs }).find(
+    (l) =>
+      isAddressEqual(l.address, ENS_VERIFIABLE_FACTORY) &&
+      isAddressEqual(l.args.implementation, ENS_PERMISSIONED_RESOLVER_IMPL),
+  );
+  if (!deployed) throw new Error("No ProxyDeployed event in the resolver deployment.");
+  return deployed.args.proxyAddress;
 }
 
 // ============ Funding the vault ============

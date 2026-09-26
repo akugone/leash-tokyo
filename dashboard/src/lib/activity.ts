@@ -1,6 +1,6 @@
 // The org's activity, read from the contracts' own events: nothing here comes from a server. Swaps (hook),
-// refused swaps recorded by `LeashVault.trySwap`, policy writes (resolver), agents issued and cut (registry),
-// and test tokens minted to the vault. Every item carries its transaction.
+// refused swaps recorded by `LeashVault.trySwap`, policy writes (each agent's own resolver), agents issued, moved
+// to a resolver and cut (registry), and test tokens minted to the vault. Every item carries its transaction.
 import {
   decodeErrorResult,
   formatUnits,
@@ -10,7 +10,15 @@ import {
   type Hex,
   type PublicClient,
 } from "viem";
-import { childNode, formatAmount, shortHex, type Deployments } from "./leash";
+import {
+  childNode,
+  ENS_PERMISSIONED_RESOLVER_IMPL,
+  ENS_VERIFIABLE_FACTORY,
+  formatAmount,
+  labelKey,
+  shortHex,
+  type Deployments,
+} from "./leash";
 
 export const activityEvents = parseAbi([
   "event LeashSwap(bytes32 indexed node, address indexed agent, bytes32 indexed poolId, uint256 notional, uint256 spentToday)",
@@ -19,8 +27,13 @@ export const activityEvents = parseAbi([
   "event TextUpdated(uint256 indexed recordId, string indexed keyHash, string key, string value)",
   "event AddressUpdated(uint256 indexed recordId, uint256 coinType, bytes addressBytes)",
   "event LabelRegistered(uint256 indexed tokenId, bytes32 indexed labelHash, string label, address owner, uint64 expiry, address indexed sender)",
+  "event ResolverUpdated(uint256 indexed tokenId, address indexed resolver, address indexed sender)",
   "event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)",
 ]);
+
+const proxyDeployedEvent = parseAbi([
+  "event ProxyDeployed(address indexed sender, address indexed proxyAddress, uint256 salt, address implementation)",
+])[0];
 
 const transferEvent = parseAbi([
   "event Transfer(address indexed from, address indexed to, uint256 value)",
@@ -47,7 +60,7 @@ const refusalAbi = parseAbi([
   "error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)",
 ]);
 
-export type ActivityKind = "swap" | "refused" | "policy" | "issued" | "cut" | "funded";
+export type ActivityKind = "swap" | "refused" | "policy" | "issued" | "resolver" | "cut" | "funded";
 
 export type ActivityItem = {
   kind: ActivityKind;
@@ -70,19 +83,41 @@ type Decoded = {
   address: Address;
 };
 
-/// Every log of the org's contracts in `[from, to]`. Two queries: the contracts' events, then the mints to the vault.
+/// Every log of the org's contracts in `[from, to]`. Each agent has its own resolver: `resolvers` holds the ones
+/// found so far and grows with the resolvers the owner deploys (`ProxyDeployed`, whose `initialize` writes the
+/// policy in the same transaction) and the ones the registry points a name to (`ResolverUpdated`).
 export async function fetchActivityLogs(
   client: PublicClient,
   d: Deployments,
   from: bigint,
   to: bigint,
+  resolvers: Set<Address>,
 ): Promise<Decoded[]> {
-  const addresses = [d.hook, d.vault, d.vaultPrevious, d.orgResolver, d.orgRegistry].filter(
-    (a): a is Address => !!a,
-  );
+  const add = (a: Address) => resolvers.add(a.toLowerCase() as Address);
+  if (d.orgResolverPrevious) add(d.orgResolverPrevious);
+  if (d.agentResolver) add(d.agentResolver);
+  if (d.orgOwner) {
+    const deployed = await client.getLogs({
+      address: ENS_VERIFIABLE_FACTORY,
+      event: proxyDeployedEvent,
+      args: { sender: d.orgOwner },
+      fromBlock: from,
+      toBlock: to,
+    });
+    for (const l of deployed) {
+      if (l.args.implementation?.toLowerCase() === ENS_PERMISSIONED_RESOLVER_IMPL.toLowerCase())
+        add(l.args.proxyAddress!);
+    }
+  }
+  const org = [d.hook, d.vault, d.vaultPrevious, d.orgRegistry].filter((a): a is Address => !!a);
   const tokens = [d.token0, d.token1].filter((a): a is Address => !!a);
   const [events, mints] = await Promise.all([
-    client.getLogs({ address: addresses, events: activityEvents, fromBlock: from, toBlock: to }),
+    client.getLogs({
+      address: [...org, ...resolvers],
+      events: activityEvents,
+      fromBlock: from,
+      toBlock: to,
+    }),
     d.vault && tokens.length
       ? client.getLogs({
           address: tokens,
@@ -93,7 +128,25 @@ export async function fetchActivityLogs(
         })
       : Promise.resolve([]),
   ]);
-  return [...events, ...mints].map((l) => ({
+  // A name pointed to a resolver nobody announced: read that resolver's logs of the range too.
+  const unseen = [
+    ...new Set(
+      events
+        .filter((l) => l.eventName === "ResolverUpdated")
+        .map((l) => (l.args as { resolver: Address }).resolver.toLowerCase() as Address)
+        .filter((a) => a !== zeroAddress && !resolvers.has(a)),
+    ),
+  ];
+  unseen.forEach(add);
+  const late = unseen.length
+    ? await client.getLogs({
+        address: unseen,
+        events: activityEvents,
+        fromBlock: from,
+        toBlock: to,
+      })
+    : [];
+  return [...events, ...late, ...mints].map((l) => ({
     eventName: l.eventName,
     args: l.args as Record<string, unknown>,
     blockNumber: l.blockNumber,
@@ -109,17 +162,25 @@ export function buildActivity(
   d: Deployments,
   senders: ReadonlyMap<Hex, Address>,
 ): ActivityItem[] {
+  // Record ids are numbered per resolver, and every agent has its own: key them by resolver.
+  const record = (l: Decoded) => `${l.address.toLowerCase()}:${String(l.args.recordId)}`;
   const nodeOfRecord = new Map<string, Hex>();
   const labelOfToken = new Map<string, string>();
+  const labelOfKey = new Map<bigint, string>();
   const labelOfNode = new Map<Hex, string>();
+  const issuedInTx = new Set<Hex>();
   for (const l of logs) {
-    if (l.eventName === "Linked") nodeOfRecord.set(String(l.args.recordId), l.args.node as Hex);
+    if (l.eventName === "Linked") nodeOfRecord.set(record(l), l.args.node as Hex);
     if (l.eventName === "LabelRegistered") {
       const label = l.args.label as string;
       labelOfToken.set(String(l.args.tokenId), label);
+      labelOfKey.set(labelKey(BigInt(l.args.tokenId as bigint)), label);
       labelOfNode.set(childNode(d.parentNode, label), label);
+      issuedInTx.add(l.transactionHash);
     }
   }
+  // Resolver a name got in the transaction that registered it, for the "issued" line.
+  const resolverAtIssue = new Map<Hex, Address>();
   const name = (node: Hex | null) =>
     node && labelOfNode.has(node) ? `${labelOfNode.get(node)}.${d.parentName}` : "the agent";
   const quote = (raw: unknown) => `${formatAmount(BigInt(raw as bigint))} lUSD`;
@@ -129,7 +190,9 @@ export function buildActivity(
   const policyByTx = new Map<Hex, { node: Hex | null; parts: string[]; first: Decoded }>();
 
   const sorted = [...logs].sort((a, b) =>
-    a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : Number(a.blockNumber - b.blockNumber),
+    a.blockNumber === b.blockNumber
+      ? a.logIndex - b.logIndex
+      : Number(a.blockNumber - b.blockNumber),
   );
   for (const l of sorted) {
     const base = { block: l.blockNumber, logIndex: l.logIndex, txHash: l.transactionHash };
@@ -157,10 +220,26 @@ export function buildActivity(
       }
       case "TextUpdated":
       case "AddressUpdated": {
-        const node = nodeOfRecord.get(String(l.args.recordId)) ?? null;
+        const node = nodeOfRecord.get(record(l)) ?? null;
         const entry = policyByTx.get(l.transactionHash) ?? { node, parts: [], first: l };
         entry.parts.push(policyPart(l));
         policyByTx.set(l.transactionHash, entry);
+        break;
+      }
+      case "ResolverUpdated": {
+        const resolver = l.args.resolver as Address;
+        if (issuedInTx.has(l.transactionHash)) {
+          resolverAtIssue.set(l.transactionHash, resolver);
+          break;
+        }
+        const label = labelOfKey.get(labelKey(BigInt(l.args.tokenId as bigint)));
+        if (!label || resolver === zeroAddress) break;
+        items.push({
+          ...base,
+          kind: "resolver",
+          node: childNode(d.parentNode, label),
+          text: `${label}.${d.parentName} moved to its own resolver ${shortHex(resolver)}: its records, its roles`,
+        });
         break;
       }
       case "LabelRegistered": {
@@ -199,6 +278,24 @@ export function buildActivity(
       }
     }
   }
+  // The registry emits ResolverUpdated before LabelRegistered: name the resolver on the issued line afterwards.
+  // Names issued before every agent had its own resolver point to the org's shared one.
+  const namesPerResolver = new Map<string, number>();
+  for (const r of resolverAtIssue.values()) {
+    namesPerResolver.set(r.toLowerCase(), (namesPerResolver.get(r.toLowerCase()) ?? 0) + 1);
+  }
+  const shared = (r: Address) =>
+    (namesPerResolver.get(r.toLowerCase()) ?? 0) > 1 ||
+    r.toLowerCase() === d.orgResolverPrevious?.toLowerCase();
+  for (const item of items) {
+    const resolver = item.kind === "issued" ? resolverAtIssue.get(item.txHash) : undefined;
+    if (resolver && resolver !== zeroAddress) {
+      const where = shared(resolver)
+        ? `on the org's shared resolver ${shortHex(resolver)}`
+        : `with its own resolver ${shortHex(resolver)}`;
+      item.text = item.text.replace(" issued,", ` issued ${where},`);
+    }
+  }
   for (const [txHash, entry] of policyByTx) {
     const who = roleOf(senders.get(txHash), d);
     items.push({
@@ -235,7 +332,8 @@ function roleOf(from: Address | undefined, d: Deployments): string | null {
 }
 
 function policyPart(l: Decoded): string {
-  if (l.eventName === "AddressUpdated") return `agent address ${shortHex(l.args.addressBytes as string)}`;
+  if (l.eventName === "AddressUpdated")
+    return `agent address ${shortHex(l.args.addressBytes as string)}`;
   const key = l.args.key as string;
   const value = l.args.value as string;
   switch (key) {

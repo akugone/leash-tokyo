@@ -60,8 +60,9 @@ export function App() {
       bps: "50",
       duration: "7",
       unit: "days",
+      delegateRisk: true,
     });
-  // A cut name comes back with its last policy, read from the resolver.
+  // A cut name comes back with its last policy, read from its own resolver.
   const reissue = () => {
     const p = snapshot?.policy.value;
     setDraft({
@@ -71,6 +72,7 @@ export function App() {
       bps: p?.maxSlippageBps?.toString() ?? "50",
       duration: "7",
       unit: "days",
+      delegateRisk: snapshot?.riskDelegated?.value ?? true,
     });
   };
   const changed = () => {
@@ -192,6 +194,7 @@ export function App() {
                     snapshot?.policy.value ? formatUnits(snapshot.policy.value.cap, 18) : null
                   }
                   currentBps={snapshot?.policy.value?.maxSlippageBps?.toString() ?? null}
+                  riskDelegated={snapshot?.riskDelegated?.value ?? null}
                 />
               </div>
 

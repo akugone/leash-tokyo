@@ -39,7 +39,8 @@ export function useAgents(client: PublicClient | null, deployments: Deployments 
               ? BigInt(deployments.orgRegistryBlock)
               : lookbackStart(latest, LOG_LOOKBACK);
         if (from <= latest) {
-          for (const label of await fetchAgentLabels(client, registry, from, latest)) {
+          const { labels: found } = await fetchAgentLabels(client, registry, from, latest);
+          for (const label of found) {
             if (!labels.current.includes(label)) labels.current.push(label);
           }
           scannedTo.current = latest;

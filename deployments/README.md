@@ -16,7 +16,8 @@ Every value is a JSON string. Keys:
 | `agentLabel` | subname label, e.g. `trader-1` |
 | `orgRegistry` | the org `UserRegistry` proxy deployed through `VerifiableFactory` |
 | `orgRegistryBlock` | block the org registry was deployed at, where the dashboard starts scanning `LabelRegistered` to list agents |
-| `orgResolver` | the org `PermissionedResolver` proxy |
+| `agentResolver` | the own `PermissionedResolver` proxy of `agentLabel`. Every agent has its own; the dashboard asks the registry (`getResolver(label)`) for each |
+| `orgResolverPrevious` | live Sepolia only: the resolver the agents shared before each got its own (`script/ens/MigrateAgentResolver.s.sol`); its past events stay in the activity feed |
 | `hook` | the `LeashHook` |
 | `token0`, `token1`, `quote` | pool currencies, `quote` is one of the two |
 | `fee`, `tickSpacing` | pool key parameters |

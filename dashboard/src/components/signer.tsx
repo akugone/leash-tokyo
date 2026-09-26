@@ -11,8 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import { isAddress } from "viem";
-import { agentLabelError } from "../lib/actions";
-import { slippageInputError, type Deployments } from "../lib/leash";
+import { agentLabelError, EAC_UNAUTHORIZED, revertSelector } from "../lib/actions";
+import { shortHex, slippageInputError, type Deployments } from "../lib/leash";
 
 export type Outcome = {
   tone: "ok" | "bad" | "info";
@@ -29,6 +29,8 @@ export type IssueForm = {
   bps: string;
   duration: string;
   unit: "minutes" | "days";
+  /// Let the risk manager edit this agent's cap and tokens, on the agent's own resolver. Off: no risk manager.
+  delegateRisk: boolean;
 };
 
 /// The human actions, however they get signed.
@@ -96,10 +98,7 @@ export function SignerProvider({ deployments, label, rpc, children }: ProviderPr
       <SignerValue value={serverSigner(status, deployments, label, rpc)}>{children}</SignerValue>
     );
   }
-  const walletReady =
-    REOWN_PROJECT_ID &&
-    Number(deployments.chainId) === SEPOLIA_CHAIN_ID &&
-    deployments.orgResolver !== undefined;
+  const walletReady = REOWN_PROJECT_ID && Number(deployments.chainId) === SEPOLIA_CHAIN_ID;
   if (!walletReady) return none;
   return (
     <Suspense fallback={none}>
@@ -175,14 +174,20 @@ function serverSigner(
           cap: form.cap,
           bps: form.bps,
           ttlSeconds: ttlSeconds(form).toString(),
+          delegateRisk: form.delegateRisk,
         });
         if (r.status !== "success") {
-          return { tone: "bad", text: "Reverted on chain.", txHash: String(r.txHash) };
+          return {
+            tone: "bad",
+            text: String(r.text ?? "Reverted on chain."),
+            txHash: String(r.txHash),
+          };
         }
         return issuedOutcome(
           form,
           deployments.parentName,
           BigInt(String(r.expiry)),
+          String(r.resolver),
           String(r.txHash),
         );
       },
@@ -218,12 +223,14 @@ export function issuedOutcome(
   form: IssueForm,
   parentName: string,
   expiry: bigint,
+  resolver: string,
   txHash: string,
 ): Outcome {
   const until = new Date(Number(expiry) * 1000).toISOString().slice(0, 16).replace("T", " ");
+  const risk = form.delegateRisk ? "risk manager delegated on it" : "no risk manager on it";
   return {
     tone: "ok",
-    text: `${form.label}.${parentName} issued: cap ${form.cap} lUSD, max slippage ${form.bps} bps, until ${until} UTC.`,
+    text: `${form.label}.${parentName} issued with its own resolver ${shortHex(resolver)} (${risk}): cap ${form.cap} lUSD, max slippage ${form.bps} bps, until ${until} UTC.`,
     txHash,
   };
 }
@@ -233,6 +240,9 @@ export function errorText(err: unknown): string {
   const e = err as { shortMessage?: string; message?: string; name?: string };
   if (e?.name === "UserRejectedRequestError" || /rejected/i.test(e?.shortMessage ?? "")) {
     return "Signature rejected in the wallet, nothing was sent.";
+  }
+  if (revertSelector(err) === EAC_UNAUTHORIZED) {
+    return "Refused by ENS: EACUnauthorizedAccountRoles, this account holds no role for that record on the agent's resolver.";
   }
   return e?.shortMessage ?? e?.message ?? String(err);
 }

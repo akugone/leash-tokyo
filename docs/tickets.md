@@ -115,6 +115,8 @@ Acceptance:
 
 ### L-05 Deploy the org PermissionedResolver (P0, 2h)
 
+> Superseded on 26 September 2026: every agent now gets its own PermissionedResolver, deployed by `IssueAgent` with its records written in `initialize` (L-06), and `DeployOrgResolver.s.sol` is gone. `MigrateAgentResolver.s.sol` moved the live agents off the shared resolver. See `docs/architecture.md`, section 2.
+
 - `VerifiableFactory.deployProxy(PermissionedResolverImpl, salt, initialize(owner, roles, setters = []))`.
 - Owner receives `ROLE_SET_TEXT | ROLE_SET_ADDR` and their admin bits on the root resource so it can write every record and delegate.
 - Script: `script/ens/DeployOrgResolver.s.sol`.

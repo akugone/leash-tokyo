@@ -55,9 +55,15 @@ abstract contract EnsScriptBase is DeploymentsScript {
         return IPermissionedRegistry(_readAddress("orgRegistry"));
     }
 
-    function _orgResolver() internal view returns (IPermissionedResolver) {
-        require(_has("orgResolver"), "EnsScriptBase: orgResolver missing, run DeployOrgResolver first");
-        return IPermissionedResolver(_readAddress("orgResolver"));
+    /// @dev The agent's own resolver, as the org registry points to it. The registry answers zero once the name
+    ///      is cut or expired.
+    function _agentResolver(string memory label) internal view returns (IPermissionedResolver) {
+        address resolver = _orgRegistry().getResolver(label);
+        require(
+            resolver != address(0),
+            string.concat("EnsScriptBase: ", label, " has no resolver (cut, expired or never issued)")
+        );
+        return IPermissionedResolver(resolver);
     }
 
     function _envOrJson(string memory envKey, string memory jsonKey, string memory fallbackValue)

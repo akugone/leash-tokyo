@@ -15,6 +15,11 @@ export function Cards({ snapshot, deployments }: Props) {
   const policy = snapshot?.policy.value ?? null;
   const lastKnown = policy?.source === "resolver";
   const quote = policy?.quote ?? deployments?.quote ?? null;
+  const cut = snapshot?.resolver.value === ZERO;
+  const resolver = cut ? snapshot?.lastResolver : snapshot?.resolver.value;
+  // Live Sepolia: names issued before each agent got its own resolver still point to the shared one.
+  const shared =
+    !!resolver && resolver.toLowerCase() === deployments?.orgResolverPrevious?.toLowerCase();
 
   return (
     <section className="facts" aria-label="facts">
@@ -94,9 +99,34 @@ export function Cards({ snapshot, deployments }: Props) {
             <Addr value={deployments?.orgRegistry ?? null} />
             <small title={deployments?.parentNode}>parent {deployments?.parentName ?? "?"}</small>
           </Fact>
-          <Fact label="resolver" error={snapshot?.resolver.error}>
-            <Addr value={snapshot?.resolver.value ?? null} />
-            {snapshot?.resolver.value === ZERO && <small>none, name expired or revoked</small>}
+          <Fact label={shared ? "resolver" : "own resolver"} error={snapshot?.resolver.error}>
+            <Addr
+              value={cut ? (snapshot?.lastResolver ?? ZERO) : (snapshot?.resolver.value ?? null)}
+            />
+            <small>
+              {shared
+                ? "the org's shared resolver, from before each agent had its own"
+                : cut
+                  ? snapshot?.lastResolver
+                    ? "its last one, the name is cut"
+                    : "none, name expired or revoked"
+                  : "ENSv2 Permissioned Resolver, this agent's records only"}
+            </small>
+          </Fact>
+          <Fact label="risk manager" error={snapshot?.riskDelegated?.error}>
+            {snapshot?.riskDelegated?.value === true ? (
+              <small>
+                {shared
+                  ? "may edit cap and tokens of every agent this resolver serves"
+                  : "may edit cap and tokens, on this resolver only"}
+              </small>
+            ) : snapshot?.riskDelegated?.value === false ? (
+              <small>no role on this agent</small>
+            ) : snapshot?.riskDelegated === null ? (
+              <small>not in the deployment record</small>
+            ) : (
+              <Pending />
+            )}
           </Fact>
         </dl>
       </div>

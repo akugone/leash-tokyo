@@ -6,11 +6,11 @@ type Props = {
   parentName: string;
   /// Prefilled form: the next free name with default rules, or a revoked name with its last policy.
   draft: IssueForm;
-  /// Called once both owner transactions landed, with the new label.
+  /// Called once every owner transaction landed, with the new label.
   onIssued: (label: string) => void;
 };
 
-/// The "+ New agent" tab: the owner issues a subname with its own mandate in two transactions.
+/// The "+ New agent" tab: the owner issues a subname with its own resolver holding its mandate.
 export function IssueAgent({ parentName, draft, onIssued }: Props) {
   const signer = useSigner();
   const [form, setForm] = useState<IssueForm>(draft);
@@ -30,7 +30,12 @@ export function IssueAgent({ parentName, draft, onIssued }: Props) {
   const issue = async () => {
     if (!signer) return;
     setBusy(true);
-    setOutcome({ tone: "info", text: "Two owner transactions: register, then the policy…" });
+    setOutcome({
+      tone: "info",
+      text: form.delegateRisk
+        ? "Three owner transactions: the agent's own resolver with its policy, the name, the risk manager…"
+        : "Two owner transactions: the agent's own resolver with its policy, then the name…",
+    });
     try {
       const result = await signer.actions.issue(form);
       setOutcome(result);
@@ -51,9 +56,10 @@ export function IssueAgent({ parentName, draft, onIssued }: Props) {
           <span className="hint">signed by the owner</span>
         </div>
         <p className="role-hint">
-          Issue a subname of {parentName} with its own mandate: address record, daily cap, max
-          slippage and expiry. Two transactions, no new contract. The risk manager's roles cover it
-          at once, and it trades from the org vault within its own cap.
+          Issue a subname of {parentName} with its own ENSv2 Permissioned Resolver: its address
+          record, daily cap and max slippage live there, and no other agent's data does. The owner
+          deploys the resolver with the policy written in one transaction, then registers the name
+          pointing to it, with its expiry. It trades from the org vault within its own cap.
         </p>
         <div className="issue-fields">
           <label className="field">
@@ -118,6 +124,19 @@ export function IssueAgent({ parentName, draft, onIssued }: Props) {
               <option value="minutes">minutes</option>
               <option value="days">days</option>
             </select>
+          </label>
+          <label className="field check">
+            <input
+              id="issue-risk"
+              type="checkbox"
+              checked={form.delegateRisk}
+              onChange={(e) => setField("delegateRisk", e.target.checked)}
+              disabled={off}
+            />
+            <span>
+              risk manager may edit this agent's cap and tokens, on its resolver only (one more
+              transaction)
+            </span>
           </label>
         </div>
         <div className="role-row">

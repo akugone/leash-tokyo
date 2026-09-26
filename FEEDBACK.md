@@ -1,6 +1,6 @@
 # Developer feedback: ENSv2 and Uniswap v4
 
-Written while building Leash (ETHGlobal Tokyo 2026): each AI agent is an ENSv2 subname of its organisation, its trading policy lives in text records on the org resolver, and a Uniswap v4 `beforeSwap` + `afterSwap` hook reads those records on every swap. The hook authenticates the swapper with an EIP-712 intent carried in `hookData` and enforces a daily cap from the real settlement delta. Deployed on Sepolia against the ENSv2 beta and the Sepolia PoolManager, tested on a Sepolia fork and locally.
+Written while building Leash (ETHGlobal Tokyo 2026): each AI agent is an ENSv2 subname of its organisation, its trading policy lives in text records on its own Permissioned Resolver, and a Uniswap v4 `beforeSwap` + `afterSwap` hook reads those records on every swap. The hook authenticates the swapper with an EIP-712 intent carried in `hookData` and enforces a daily cap from the real settlement delta. Deployed on Sepolia against the ENSv2 beta and the Sepolia PoolManager, tested on a Sepolia fork and locally.
 
 - [ENSv2](#ensv2)
 - [Uniswap v4](#uniswap-v4)
@@ -14,6 +14,7 @@ The building blocks are exactly the right ones: they are what makes Leash possib
 - **Per record permissions on the resolver.** Enhanced Access Control lets the risk manager write `leash.dailyNotional` and `leash.tokens` and nothing else: not `addr`, not other keys, not the registry. This is the feature the project is built on, and no other naming system offers it.
 - **Native subname expiry.** A time boxed mandate costs zero lines of code: the hook requires `getExpiry(labelhash) > block.timestamp`. And `unregister` sets the expiry to now, which gives the owner an instant kill switch in one transaction.
 - **One registry per org.** `VerifiableFactory.deployProxy` gives each organisation its own namespace running the official `UserRegistryImpl` code, at a deterministic CREATE2 address.
+- **A resolver per agent, created with its records.** `VerifiableFactory.deployProxy(PermissionedResolverImpl, salt, initialize(grants, calls))` deploys a resolver and writes the agent's `addr` and policy records in the same transaction, since `initialize` runs setter calls unchecked. `setResolver` then moves a live name onto it, keeping its token and expiry: that is how Leash migrated its agents off a shared resolver on Sepolia.
 - **Records readable on chain.** The hook reads the policy straight from the resolver at swap time, with no oracle, no server and no cache: a new cap or a revocation applies from the next block.
 - **Names are ERC1155 tokens held by the org.** The agent only appears in the `addr` record, so it can trade under its name but can neither renew nor transfer it.
 
@@ -31,7 +32,8 @@ The building blocks are exactly the right ones: they are what makes Leash possib
 
 - A published ABI versioned per deployment, with a changelog of address changes on the Deployments page.
 - An official example of a role scoped to one record key: a `grantSetterRoles` snippet in the docs would have been enough.
-- An option to scope a permission per name and per key. Today a right on `leash.dailyNotional` applies to every name served by the resolver; limiting it to one agent would avoid deploying one resolver per agent.
+- An option to scope a permission per name and per key. Today a right on `leash.dailyNotional` applies to every name served by the resolver. Leash gives every agent its own resolver to get per agent delegation (which also lets each agent own its data, the model the ENSv2 docs encourage); per name scoping would make the same delegation possible on a shared resolver, without a proxy deployment per agent.
+- Let `initialize` grant scoped roles, or document that it cannot: a `grantSetterRoles` call among `initialize`'s `calls` reverts `EACCannotGrantRoles` because the factory is the caller, so creating an agent's resolver with its risk manager takes a second owner transaction.
 - Explicit errors for an account that cannot receive the name token and for a factory called twice with the same salt.
 - A documented on-chain read helper (or a note in the docs) for contracts that consume text records through `resolve`.
 
@@ -39,7 +41,7 @@ The building blocks are exactly the right ones: they are what makes Leash possib
 
 - `src/LeashHook.sol` and `src/libraries/LeashEnsLib.sol`: expiry and resolver lookup on the org registry, then `addr` and `leash.*` records read through `resolve`.
 - `src/libraries/EnsNameLib.sol`: DNS encoding of `label.parent.eth` for the resolver.
-- `script/ens/`: parent registration (commit / reveal), org registry and resolver through `VerifiableFactory`, agent issuance, `grantSetterRoles` for the risk manager.
+- `script/ens/`: parent registration (commit / reveal), org registry through `VerifiableFactory`, agent issuance with its own resolver created by `VerifiableFactory` (records in `initialize`), `grantSetterRoles` for the risk manager on that resolver, and `MigrateAgentResolver` moving a live agent off a shared resolver.
 - `test/fork/EnsSetup.t.sol`: the full ENS flow against the real Sepolia contracts, including the versioned `EACUnauthorizedAccountRoles` resource.
 - `docs/ens-v2-sepolia-api.md`: the API as deployed, role bitmaps, gas measured on the fork.
 

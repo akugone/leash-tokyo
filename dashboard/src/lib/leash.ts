@@ -44,11 +44,29 @@ export function labelId(label: string): bigint {
   return BigInt(keccak256(stringToHex(label)));
 }
 
+/// What a registry token id and its label id share: the registry replaces the low 32 bits of the labelhash with
+/// a version, so a re-issued name gets a new token id with the same key.
+export function labelKey(tokenIdOrLabelId: bigint): bigint {
+  return tokenIdOrLabelId >> 32n;
+}
+
 /// Node of `label` under `parentNode`.
 export function childNode(parentNode: Hex, label: string): Hex {
   return keccak256(
     encodePacked(["bytes32", "bytes32"], [parentNode, keccak256(stringToHex(label))]),
   );
+}
+
+// ============ ENSv2 on Sepolia (and any anvil fork of it) ============
+
+/// Deploys each agent's own `PermissionedResolver` proxy.
+export const ENS_VERIFIABLE_FACTORY: Address = "0x9e726Eb570beb6BCEb495AB8cdA7df517d4e841C";
+export const ENS_PERMISSIONED_RESOLVER_IMPL: Address = "0x14F09Fd05d4585759e54844DC9B00147131Cf243";
+
+/// `ROLE_SET_TEXT` of the resolver, and the EAC resource it derives for a text key.
+export const ROLE_SET_TEXT = 1n << 4n;
+export function textResource(key: string): bigint {
+  return BigInt(keccak256(stringToHex(key)));
 }
 
 // ============ Resolver calldata ============
@@ -160,7 +178,11 @@ export type Deployments = {
   orgRegistry: Address;
   /// Block the org registry was deployed at: where the agent list starts scanning.
   orgRegistryBlock?: string;
-  orgResolver?: Address;
+  /// Own resolver of `agentLabel`, informational: the dashboard asks the registry for each agent's resolver.
+  agentResolver?: Address;
+  /// Live Sepolia: the resolver every agent shared before each got its own. Its past policy writes stay in the
+  /// activity feed.
+  orgResolverPrevious?: Address;
   hook: Address;
   /// `LeashVault` holding the org's tokens, absent on deployments made before the vault.
   vault?: Address;
@@ -191,7 +213,8 @@ export function parseDeployments(json: unknown): Deployments {
     "hook",
     "vault",
     "vaultPrevious",
-    "orgResolver",
+    "agentResolver",
+    "orgResolverPrevious",
     "orgOwner",
     "agent",
     "quote",

@@ -14,9 +14,11 @@ Responsibilities:
 - Revoke a subname immediately, on owner authority only.
 - Expose ownership and expiry to the hook in a single view call.
 
-### 2. Permissioned Resolver
+### 2. Permissioned Resolver, one per agent
 
-Stores the agent's identity and policy on `trader-N.leash.eth`.
+Every agent has its own ENSv2 Permissioned Resolver, holding its identity and policy on `trader-N.leash.eth` and no other agent's records. The owner deploys it through the ENS `VerifiableFactory` with the policy written in `initialize` (one transaction), then registers the subname pointing to it (`script/ens/IssueAgent.s.sol`, the dashboard's **+ New agent** tab). Owning its resolver is what lets an agent own its data: a role granted on it covers that agent only, and cutting or re-pointing one agent never touches another's records.
+
+Agents issued before this change shared one org resolver; `script/ens/MigrateAgentResolver.s.sol` copies an agent's records into a fresh resolver and re-points the name with `setResolver`, keeping its token and expiry. On Sepolia, `trader-1` and `trader-2` were moved this way; the shared resolver is kept as `orgResolverPrevious` in `deployments/sepolia.json` so its history stays in the activity feed.
 
 Records:
 
@@ -34,10 +36,12 @@ The deployed resolver stores records by DNS-encoded name, not by node, and is re
 
 ### 3. Enhanced Access Control
 
-Two roles, scoped through the resolver's EAC:
+Two roles, scoped through each agent's resolver EAC:
 
-- `risk-manager`: granted with `grantSetterRoles(setText(name, "leash.dailyNotional", ""), riskManager)`, repeated for `leash.tokens`. `leash.quote` and `leash.maxSlippageBps` stay owner-only: an empty slippage record switches the bound off, so only the owner may write it. The resolver decodes that calldata, derives `resource = keccak256(bytes(key))`, and grants `ROLE_SET_TEXT` scoped to that resource, for the whole resolver, not one name. The risk-manager cannot touch `addr`, any other key, or the registry.
-- `owner`: keeps the registry roles (`register`, `unregister`, `renew`, `setResolver`, `setSubregistry`) and the resolver's root roles. The owner can `revokeRoles` on the risk-manager at any time.
+- `risk-manager`: granted with `grantSetterRoles(setText(name, "leash.dailyNotional", ""), riskManager)`, repeated for `leash.tokens`, both in one owner `multicall` on the agent's resolver (`script/ens/GrantRiskManager.s.sol`). `leash.quote` and `leash.maxSlippageBps` stay owner-only: an empty slippage record switches the bound off, so only the owner may write it. The resolver decodes that calldata, derives `resource = keccak256(bytes(key))`, and grants `ROLE_SET_TEXT` scoped to that resource. The resolver scopes per key, not per name; one resolver per agent turns that into a role on these two keys of this one agent. An agent can be issued with no risk manager at all, and revoking the risk manager on one agent leaves the others untouched. The risk-manager cannot touch `addr`, any other key, another agent, or the registry.
+- `owner`: keeps the registry roles (`register`, `unregister`, `renew`, `setResolver`, `setSubregistry`) and the root roles of every agent's resolver. The owner can `revokeRoles` on the risk-manager at any time, agent by agent.
+
+The scoped grant cannot ride along in the resolver's `initialize`: the factory is the caller there, and `grantSetterRoles` reverts `EACCannotGrantRoles`. Hence the separate owner transaction.
 
 This split is the point. A risk desk should be able to tighten an agent's limits at 3am without holding the authority to mint or revoke agents.
 
