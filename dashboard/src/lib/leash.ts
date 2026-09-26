@@ -15,7 +15,7 @@ import { resolverInnerAbi } from "./abi";
 
 // ============ Naming ============
 
-/// DNS wire encoding of a dotted name, e.g. "trader-1.acme.eth" -> 0x08trader-1 04acme 03eth 00.
+/// DNS wire encoding of a dotted name, e.g. "trader-1.leash.eth" -> 0x08trader-1 05leash 03eth 00.
 export function dnsEncode(name: string): Hex {
   const labels = name.split(".").filter((l) => l.length > 0);
   let out = "0x";

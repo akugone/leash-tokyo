@@ -127,10 +127,10 @@ function Hero() {
 /// Replays the demo script: one swap goes through, one hits the cap, one after the leash is cut.
 function HeroConsole() {
   const rows: { ok: boolean; text: string; note: string }[] = [
-    { ok: true, text: "trader-1.acme.eth  buy 25 lUSD of lETH", note: "swap settled · 10% of daily cap" },
-    { ok: false, text: "trader-1.acme.eth  buy 300 lUSD of lETH", note: "DailyCapExceeded" },
+    { ok: true, text: "trader-1.leash.eth  buy 25 lUSD of lETH", note: "swap settled · 10% of daily cap" },
+    { ok: false, text: "trader-1.leash.eth  buy 300 lUSD of lETH", note: "DailyCapExceeded" },
     { ok: false, text: "risk-manager  unregister(trader-1)", note: "EACUnauthorizedAccountRoles" },
-    { ok: false, text: "trader-1.acme.eth  buy 5 lUSD of lETH", note: "LeashRevoked" },
+    { ok: false, text: "trader-1.leash.eth  buy 5 lUSD of lETH", note: "LeashRevoked" },
   ];
   return (
     <div className="lp-console" role="img" aria-label="Example of swaps checked by the Leash hook">
@@ -196,7 +196,7 @@ function WhatAndWho() {
         <div className="lp-callout">
           <Icon name="link" />
           <p>
-            <b>trader-1.acme.eth</b> is not a label on a dashboard. It is the credential. Its{" "}
+            <b>trader-1.leash.eth</b> is not a label on a dashboard. It is the credential. Its{" "}
             <code>addr</code> record is the only key that may sign for it, its text records are the
             limits, its expiry is the mandate's end date.
           </p>
@@ -267,8 +267,8 @@ function Problems() {
 
 function HowItWorks() {
   const steps: { n: string; title: string; body: string }[] = [
-    { n: "1", title: "Own a namespace", body: "The org owns acme.eth and deploys its own ENSv2 Permissioned Registry." },
-    { n: "2", title: "Issue the agent", body: "Register trader-1.acme.eth with an expiry. Its addr record is the agent's key." },
+    { n: "1", title: "Own a namespace", body: "The org owns leash.eth and deploys its own ENSv2 Permissioned Registry." },
+    { n: "2", title: "Issue the agent", body: "Register trader-1.leash.eth with an expiry. Its addr record is the agent's key." },
     { n: "3", title: "Write the policy", body: "Text records hold the quote token, daily cap, allowed tokens and max slippage." },
     { n: "4", title: "Sign and swap", body: "The agent signs a SwapIntent and passes it in hookData through any v4 router." },
     { n: "5", title: "Hook enforces", body: "Every swap is checked in the pool before and after it settles. See below." },
@@ -299,18 +299,18 @@ function HowItWorks() {
             <h3 className="lp-h3">The policy, as ENS records</h3>
             <pre className="lp-code">
               <code>
-                <span className="lp-c">{"# trader-1.acme.eth"}</span>
-                {"\naddr                 0xA9e1…42c0"}
-                {"\nleash.quote          0x…lUSD"}
-                {"\nleash.dailyNotional  250000000"}
-                {"\nleash.tokens         0x…lETH,0x…lUSD"}
+                <span className="lp-c">{"# trader-1.leash.eth"}</span>
+                {"\naddr                 0xA162…4A0d"}
+                {"\nleash.quote          0x3EC7…lUSD"}
+                {"\nleash.dailyNotional  250000000000000000000"}
+                {"\nleash.tokens         0x3EC7…lUSD,0x9E63…lETH"}
                 {"\nleash.maxSlippageBps 100"}
-                {"\nexpiry               2026-12-31"}
+                {"\nexpiry               2026-10-26"}
               </code>
             </pre>
             <p className="lp-muted lp-small">
               Human readable strings, parsed onchain by LeashPolicyLib. The cap is in raw quote token
-              units, per UTC day, across every pool that uses the hook.
+              units (lUSD has 18 decimals, so this is 250 lUSD), per UTC day, across every pool that uses the hook.
             </p>
           </div>
           <div>

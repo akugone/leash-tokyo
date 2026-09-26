@@ -38,22 +38,22 @@ describe("namehash", () => {
     expect(namehash("")).toBe(`0x${"00".repeat(32)}`);
   });
   test("matches viem for a three label name", () => {
-    expect(namehash("trader-1.acme.eth")).toBe(viemNamehash("trader-1.acme.eth"));
+    expect(namehash("trader-1.leash.eth")).toBe(viemNamehash("trader-1.leash.eth"));
   });
   test("childNode composes with namehash", () => {
-    expect(childNode(namehash("acme.eth"), "trader-1")).toBe(namehash("trader-1.acme.eth"));
+    expect(childNode(namehash("leash.eth"), "trader-1")).toBe(namehash("trader-1.leash.eth"));
   });
 });
 
 describe("dnsEncode", () => {
-  test("trader-1.acme.eth", () => {
-    const expected: Hex = `0x08${"7472616465722d31"}04${"61636d65"}03${"657468"}00`;
-    expect(dnsEncode("trader-1.acme.eth")).toBe(expected);
+  test("trader-1.leash.eth", () => {
+    const expected: Hex = `0x08${"7472616465722d31"}05${"6c65617368"}03${"657468"}00`;
+    expect(dnsEncode("trader-1.leash.eth")).toBe(expected);
   });
   test("matches viem packetToBytes including the trailing zero byte", () => {
-    const viemBytes = toHex(packetToBytes("trader-1.acme.eth"));
+    const viemBytes = toHex(packetToBytes("trader-1.leash.eth"));
     expect(viemBytes.endsWith("00")).toBe(true);
-    expect(dnsEncode("trader-1.acme.eth")).toBe(viemBytes);
+    expect(dnsEncode("trader-1.leash.eth")).toBe(viemBytes);
   });
 });
 
@@ -105,13 +105,13 @@ describe("config", () => {
     expect(() => parseDeployments({ chainId: "1" })).toThrow('missing "parentName"');
     const d = parseDeployments({
       chainId: "11155111",
-      parentName: "leashdemo.eth",
+      parentName: "leash.eth",
       orgRegistry: "0x0000000000000000000000000000000000000001",
       hook: "0x0000000000000000000000000000000000000002",
     });
-    expect(d.parentNode).toBe(namehash("leashdemo.eth"));
+    expect(d.parentNode).toBe(namehash("leash.eth"));
     const zero = parseDeployments({ ...d, parentNode: `0x${"00".repeat(32)}` });
-    expect(zero.parentNode).toBe(namehash("leashdemo.eth"));
+    expect(zero.parentNode).toBe(namehash("leash.eth"));
   });
 });
 
