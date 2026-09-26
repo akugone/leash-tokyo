@@ -26,6 +26,7 @@ Records:
 | `leash.quote`          | text | address, the token the cap is denominated in                  |
 | `leash.dailyNotional`  | text | uint256 decimal string, cap per UTC day, raw units of quote   |
 | `leash.tokens`         | text | comma separated addresses, tokens the agent may trade         |
+| `leash.maxSlippageBps` | text | optional, owner-only, decimal basis points below 10000: maximum price impact of one swap, from the pool price at execution. Empty: not enforced |
 
 Encoding: human readable strings, parsed onchain by `LeashPolicyLib`. The hook pays for parsing on every swap; the library fails closed, reverting on any malformed value rather than under-enforcing. No policy cache: the hook always reads the resolver directly, so there is no staleness window.
 
@@ -35,7 +36,7 @@ The deployed resolver stores records by DNS-encoded name, not by node, and is re
 
 Two roles, scoped through the resolver's EAC:
 
-- `risk-manager`: granted with `grantSetterRoles(setText(name, "leash.dailyNotional", ""), riskManager)`, repeated for `leash.tokens`. The resolver decodes that calldata, derives `resource = keccak256(bytes(key))`, and grants `ROLE_SET_TEXT` scoped to that resource, for the whole resolver, not one name. The risk-manager cannot touch `addr`, any other key, or the registry.
+- `risk-manager`: granted with `grantSetterRoles(setText(name, "leash.dailyNotional", ""), riskManager)`, repeated for `leash.tokens`. `leash.quote` and `leash.maxSlippageBps` stay owner-only: an empty slippage record switches the bound off, so only the owner may write it. The resolver decodes that calldata, derives `resource = keccak256(bytes(key))`, and grants `ROLE_SET_TEXT` scoped to that resource, for the whole resolver, not one name. The risk-manager cannot touch `addr`, any other key, or the registry.
 - `owner`: keeps the registry roles (`register`, `unregister`, `renew`, `setResolver`, `setSubregistry`) and the resolver's root roles. The owner can `revokeRoles` on the risk-manager at any time.
 
 This split is the point. A risk desk should be able to tighten an agent's limits at 3am without holding the authority to mint or revoke agents.
@@ -57,7 +58,9 @@ Flags: `beforeSwap | afterSwap`.
 7. `intent.poolId`, `zeroForOne` and `amountSpecified` match the actual swap call (`IntentMismatch`).
 8. `ECDSA.recover(digest, sig) == agent` (`BadSignature`).
 9. Both `currency0` and `currency1` are in `leash.tokens` (`TokenNotAllowed`).
-10. Stash `(node, quote, cap)` in transient storage for `afterSwap`.
+10. If `leash.maxSlippageBps` is set, the swap's `sqrtPriceLimitX96` is no wider than `priceLimit(poolId, zeroForOne, bps)`, the pool price moved by `bps` (`SlippageTooLoose`). The check binds whoever submits the swap, not only the agent: the price limit is not part of the signed intent, so the hook enforces it on the swap params. A limit inside the bound stops the swap there (partial fill of an exact input), and `afterSwap` counts only what moved.
+    What it bounds: the price impact of this swap, measured from the price at execution. What it does not: a price already moved before the swap (a sandwich front-run), since no reference price is signed. Binding that would need a signed minimum output or reference price in `SwapIntent`. The agent requests 90% of the bound by default, so a price move between its read and the swap does not trip the check.
+11. Stash `(node, quote, cap)` in transient storage for `afterSwap`.
 
 `afterSwap` accounting:
 

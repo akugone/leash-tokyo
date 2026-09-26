@@ -13,12 +13,14 @@ import {LeashOrgLib} from "./LeashOrgLib.sol";
 /// @notice Issue an agent subname under the org registry and write its policy records (ticket L-06).
 /// @dev The subname token is owned by the org owner, never by the agent key. The agent only appears in the
 ///      ETH address record. Policy inputs: `quote` from the JSON (`quote`) or env `QUOTE`; tokens from the
-///      JSON (`token0`, `token1`) or env `TOKEN0`/`TOKEN1`; cap from env `DAILY_CAP` (default 250e18).
+///      JSON (`token0`, `token1`) or env `TOKEN0`/`TOKEN1`; cap from env `DAILY_CAP` (default 250e18); slippage
+///      bound from env `MAX_SLIPPAGE_BPS` (default 100, i.e. 1%).
 ///      Entrypoints: `run()` uses `AGENT_LABEL` (default `trader-1`) and `AGENT_TTL` (default 7 days);
 ///      `issue(string,uint64)` takes the label and ttl explicitly, e.g. `--sig "issue(string,uint64)" trader-2 180`.
 contract IssueAgent is EnsScriptBase {
     uint256 internal constant DEFAULT_TTL = 7 days;
     uint256 internal constant DEFAULT_CAP = 250e18;
+    uint256 internal constant DEFAULT_MAX_SLIPPAGE_BPS = 100;
 
     // ============ External functions ============
 
@@ -36,6 +38,8 @@ contract IssueAgent is EnsScriptBase {
         IPermissionedRegistry orgRegistry = _orgRegistry();
         IPermissionedResolver orgResolver = _orgResolver();
         (address quote, address[] memory tokens, uint256 cap) = _policyInputs();
+        uint256 maxSlippageBps = vm.envOr("MAX_SLIPPAGE_BPS", DEFAULT_MAX_SLIPPAGE_BPS);
+        require(maxSlippageBps < 10_000, "IssueAgent: MAX_SLIPPAGE_BPS must be below 10000");
 
         bytes memory dnsName = EnsNameLib.dnsEncode(label, EnsNameLib.dnsEncodeName(_parentName()));
         uint64 expiry = uint64(block.timestamp) + ttl;
@@ -43,7 +47,7 @@ contract IssueAgent is EnsScriptBase {
         vm.startBroadcast(_ownerPk());
         uint256 tokenId =
             orgRegistry.register(label, owner, address(0), address(orgResolver), LeashOrgLib.agentTokenRoles(), expiry);
-        orgResolver.multicall(LeashOrgLib.policyCalls(dnsName, agent, quote, cap, tokens));
+        orgResolver.multicall(LeashOrgLib.policyCalls(dnsName, agent, quote, cap, tokens, maxSlippageBps));
         vm.stopBroadcast();
 
         require(orgRegistry.getExpiry(EnsNameLib.labelId(label)) > block.timestamp, "IssueAgent: not live");
@@ -54,6 +58,11 @@ contract IssueAgent is EnsScriptBase {
                 == keccak256(bytes(LeashOrgLib.capString(cap))),
             "IssueAgent: cap record mismatch"
         );
+        require(
+            keccak256(bytes(LeashEnsLib.readText(orgResolver, dnsName, LeashOrgLib.KEY_MAX_SLIPPAGE_BPS)))
+                == keccak256(bytes(LeashOrgLib.capString(maxSlippageBps))),
+            "IssueAgent: slippage record mismatch"
+        );
 
         console2.log("IssueAgent: issued", string.concat(label, ".", _parentName()));
         console2.log("IssueAgent: tokenId", tokenId);
@@ -63,6 +72,7 @@ contract IssueAgent is EnsScriptBase {
         console2.log("IssueAgent: leash.quote", LeashOrgLib.addressString(quote));
         console2.log("IssueAgent: leash.dailyNotional", LeashOrgLib.capString(cap));
         console2.log("IssueAgent: leash.tokens", LeashOrgLib.tokenListString(tokens));
+        console2.log("IssueAgent: leash.maxSlippageBps", LeashOrgLib.capString(maxSlippageBps));
     }
 
     // ============ Internal functions ============

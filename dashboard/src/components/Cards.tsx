@@ -40,6 +40,24 @@ export function Cards({ snapshot, deployments }: Props) {
               </small>
             )}
           </Fact>
+          <Fact label="max slippage" error={snapshot?.policy.error}>
+            {policy ? (
+              policy.maxSlippageError ? (
+                <span className="fact-error" title={policy.maxSlippageError}>
+                  {policy.maxSlippageError}
+                </span>
+              ) : policy.maxSlippageBps === null ? (
+                <small>not bounded</small>
+              ) : (
+                <>
+                  <span className="num">{Number(policy.maxSlippageBps) / 100}%</span>
+                  <small>{policy.maxSlippageBps.toString()} bps</small>
+                </>
+              )
+            ) : (
+              <Pending />
+            )}
+          </Fact>
           <Fact label="allowed tokens" error={snapshot?.policy.error}>
             {policy ? (
               policy.tokens.length === 0 ? (

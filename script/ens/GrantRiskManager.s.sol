@@ -9,6 +9,7 @@ import {EnsScriptBase} from "./EnsScriptBase.s.sol";
 import {LeashOrgLib} from "./LeashOrgLib.sol";
 
 /// @notice Give the risk manager `ROLE_SET_TEXT` on `leash.dailyNotional` and `leash.tokens` only (ticket L-07).
+///         `leash.quote` and `leash.maxSlippageBps` stay owner-only: clearing the slippage record disables the bound.
 /// @dev `grantRoles` is disabled on the deployed resolver; `grantSetterRoles` decodes a setter calldata,
 ///      derives the resource from the text key and grants the matching role. Scoping is per key, not per name:
 ///      the risk manager can edit these two keys on every agent served by the org resolver, nothing else,
@@ -40,6 +41,12 @@ contract GrantRiskManager is EnsScriptBase {
                 ResolverRoles.textResource(LeashOrgLib.KEY_QUOTE), ResolverRoles.ROLE_SET_TEXT, riskManager
             ),
             "GrantRiskManager: risk manager must not write leash.quote"
+        );
+        require(
+            !orgResolver.hasRoles(
+                ResolverRoles.textResource(LeashOrgLib.KEY_MAX_SLIPPAGE_BPS), ResolverRoles.ROLE_SET_TEXT, riskManager
+            ),
+            "GrantRiskManager: risk manager must not write leash.maxSlippageBps"
         );
         _logAddress("GrantRiskManager: riskManager", riskManager);
     }

@@ -21,6 +21,7 @@ library LeashOrgLib {
     string internal constant KEY_QUOTE = "leash.quote";
     string internal constant KEY_DAILY_NOTIONAL = "leash.dailyNotional";
     string internal constant KEY_TOKENS = "leash.tokens";
+    string internal constant KEY_MAX_SLIPPAGE_BPS = "leash.maxSlippageBps";
 
     /// @dev `VerifiableFactory` salts. The factory mixes in `msg.sender`, so they are per owner.
     uint256 internal constant REGISTRY_SALT = uint256(keccak256("leash.registry.v1"));
@@ -88,6 +89,26 @@ library LeashOrgLib {
         calls[1] = abi.encodeCall(IPermissionedResolver.setText, (dnsName, KEY_QUOTE, addressString(quote)));
         calls[2] = abi.encodeCall(IPermissionedResolver.setText, (dnsName, KEY_DAILY_NOTIONAL, capString(cap)));
         calls[3] = abi.encodeCall(IPermissionedResolver.setText, (dnsName, KEY_TOKENS, tokenListString(tokens)));
+    }
+
+    /// @notice Same as `policyCalls` plus `leash.maxSlippageBps`, the maximum price impact of one swap. Owner-only:
+    ///         an empty value switches the bound off, so the risk manager gets no role on this key.
+    /// @param maxSlippageBps Basis points of the pool price, below 10000, written as a decimal string.
+    function policyCalls(
+        bytes memory dnsName,
+        address agent,
+        address quote,
+        uint256 cap,
+        address[] memory tokens,
+        uint256 maxSlippageBps
+    ) internal pure returns (bytes[] memory calls) {
+        bytes[] memory base = policyCalls(dnsName, agent, quote, cap, tokens);
+        calls = new bytes[](base.length + 1);
+        for (uint256 i = 0; i < base.length; i++) {
+            calls[i] = base[i];
+        }
+        calls[base.length] =
+            abi.encodeCall(IPermissionedResolver.setText, (dnsName, KEY_MAX_SLIPPAGE_BPS, capString(maxSlippageBps)));
     }
 
     /// @notice `0x` + 40 hex chars, checksummed. Accepted by `LeashPolicyLib.parseAddress`.

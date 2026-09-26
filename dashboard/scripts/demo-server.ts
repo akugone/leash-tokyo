@@ -6,7 +6,8 @@
  *   DELETE /api/agent-events          clear the feed between rehearsals
  *   GET  /api/demo/status             {enabled, riskManager, owner, rpc}
  *   POST /api/demo/tighten {cap}      risk-manager: setText(leash.dailyNotional) on the org resolver
- *   POST /api/demo/forbid             risk-manager tries unregister / setAddress / setText(leash.quote): must revert
+ *   POST /api/demo/forbid             risk-manager tries unregister / setAddress / setText(leash.quote) /
+ *                                     setText(leash.maxSlippageBps): must revert
  *   POST /api/demo/cut                owner: unregister(labelId) on the org registry
  *
  * Keys come from the repo root `.env` (RISK_MANAGER_PK, OWNER_PK) and never leave the dev server. The
@@ -186,6 +187,15 @@ async function forbid() {
         abi: resolverWriteAbi,
         functionName: "setText",
         args: [ctx.name, "leash.quote", account.address],
+      },
+    },
+    {
+      what: "setText(leash.maxSlippageBps) by risk-manager",
+      call: {
+        address: ctx.resolver,
+        abi: resolverWriteAbi,
+        functionName: "setText",
+        args: [ctx.name, "leash.maxSlippageBps", ""],
       },
     },
   ] as const;

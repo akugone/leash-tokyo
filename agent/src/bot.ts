@@ -61,6 +61,8 @@ export type Policy = {
 
 export type Options = {
   once: boolean;
+  /** Price move the swap may allow, in basis points. Defaults to the policy's `leash.maxSlippageBps`. */
+  slippageBps?: bigint;
   misbehave: boolean;
   /** Send even when the policy read reverts or nothing is left today, so the on chain rejection is visible. */
   force: boolean;
@@ -88,6 +90,20 @@ export function chooseAmount(
   return wanted < remaining ? wanted : remaining;
 }
 
+/**
+ * Slippage to request, in basis points: what the caller asked, else 90% of the policy bound, else none (full price
+ * range). The hook recomputes its bound from the price at execution, so a limit sitting exactly on the bound fails
+ * `SlippageTooLoose` as soon as the price moves between the read and the swap, even in the agent's favour; the 10%
+ * headroom absorbs that. Bounds too small to take 10% off are used as is. Never clamped to the policy: a wider
+ * request goes out and the hook answers `SlippageTooLoose`.
+ */
+export function chooseSlippage(requested: bigint | undefined, policyMax: bigint | null): bigint | null {
+  if (requested !== undefined) return requested;
+  if (policyMax === null) return null;
+  const withHeadroom = (policyMax * 9n) / 10n;
+  return withHeadroom > 0n ? withHeadroom : policyMax;
+}
+
 export function parseCliArgs(argv: readonly string[]): Options {
   const { values } = parseArgs({
     args: [...argv],
@@ -96,6 +112,7 @@ export function parseCliArgs(argv: readonly string[]): Options {
       misbehave: { type: "boolean", default: false },
       force: { type: "boolean", default: false },
       amount: { type: "string" },
+      "slippage-bps": { type: "string" },
       label: { type: "string" },
       interval: { type: "string", default: "15" },
       help: { type: "boolean", short: "h", default: false },
@@ -104,7 +121,7 @@ export function parseCliArgs(argv: readonly string[]): Options {
   });
   if (values.help) {
     console.log(
-      "usage: bun run src/bot.ts [--once] [--misbehave] [--force] [--amount <wei>] [--label trader-1] [--interval 15]",
+      "usage: bun run src/bot.ts [--once] [--misbehave] [--force] [--amount <wei>] [--slippage-bps <bps>] [--label trader-1] [--interval 15]",
     );
     process.exit(0);
   }
@@ -115,6 +132,7 @@ export function parseCliArgs(argv: readonly string[]): Options {
     misbehave: values.misbehave,
     force: values.force,
     amount: values.amount === undefined ? undefined : BigInt(values.amount),
+    slippageBps: values["slippage-bps"] === undefined ? undefined : BigInt(values["slippage-bps"]),
     label: values.label,
     interval,
   };
@@ -204,13 +222,17 @@ async function tick({ publicClient, walletClient, account, deployments, opts }: 
   const ctx = { label, parentName: deployments.parentName };
 
   // ---- read policy ----
-  const read = <T>(fn: "policy" | "remainingToday" | "nonces", args: readonly [string] | readonly [Hex]) =>
-    publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: fn, args } as never) as Promise<T>;
-  const [policyRes, remainingRes, nonceRes] = await Promise.allSettled([
+  const read = <T>(
+    fn: "policy" | "remainingToday" | "nonces" | "maxSlippageBps",
+    args: readonly [string] | readonly [Hex],
+  ) => publicClient.readContract({ address: hook, abi: LEASH_HOOK_ABI, functionName: fn, args } as never) as Promise<T>;
+  const [policyRes, remainingRes, nonceRes, slippageRes] = await Promise.allSettled([
     read<readonly [Address, Address, bigint, readonly Address[], bigint]>("policy", [label]),
     read<bigint>("remainingToday", [label]),
     read<bigint>("nonces", [node]),
+    read<readonly [boolean, bigint]>("maxSlippageBps", [label]),
   ]);
+  const policyMaxSlippage = slippageRes.status === "fulfilled" && slippageRes.value[0] ? slippageRes.value[1] : null;
 
   let policy: Policy | undefined;
   if (policyRes.status === "fulfilled") {
@@ -270,8 +292,10 @@ async function tick({ publicClient, walletClient, account, deployments, opts }: 
   const chainId = await publicClient.getChainId();
   const signature = await signIntent(account, leashDomain(chainId, hook), intent);
   const hookData = encodeHookData(label, intent, signature);
+  const slippageBps = chooseSlippage(opts.slippageBps, policyMaxSlippage);
+  const sqrtPriceLimitX96 = await priceLimitFor(publicClient, hook, deployments.poolId, quoteIsToken0, slippageBps);
   console.log(
-    `  ${opts.force ? "FORCE " : opts.misbehave ? "MISBEHAVE " : ""}swap ${fmt(amount)} exact in, ${quoteIsToken0 ? "0->1" : "1->0"}, deadline ${deadline}`,
+    `  ${opts.force ? "FORCE " : opts.misbehave ? "MISBEHAVE " : ""}swap ${fmt(amount)} exact in, ${quoteIsToken0 ? "0->1" : "1->0"}, ${slippageText(slippageBps, policyMaxSlippage)}, deadline ${deadline}`,
   );
 
   // ---- allowance for PoolSwapTest ----
@@ -289,7 +313,7 @@ async function tick({ publicClient, walletClient, account, deployments, opts }: 
     {
       zeroForOne: intent.zeroForOne,
       amountSpecified: intent.amountSpecified,
-      sqrtPriceLimitX96: intent.zeroForOne ? MIN_SQRT_PRICE + 1n : MAX_SQRT_PRICE - 1n,
+      sqrtPriceLimitX96,
     },
     { takeClaims: false, settleUsingBurn: false },
     hookData,
@@ -328,6 +352,32 @@ async function tick({ publicClient, walletClient, account, deployments, opts }: 
 }
 
 // ============ Chain helpers ============
+
+/**
+ * `sqrtPriceLimitX96` for a swap: the hook's own `priceLimit` for `slippageBps` from the current pool price, so the
+ * limit is exactly what the hook checks against, or the full price range when no slippage applies.
+ */
+export async function priceLimitFor(
+  publicClient: TickContext["publicClient"],
+  hook: Address,
+  poolId: Hex,
+  zeroForOne: boolean,
+  slippageBps: bigint | null,
+): Promise<bigint> {
+  if (slippageBps === null) return zeroForOne ? MIN_SQRT_PRICE + 1n : MAX_SQRT_PRICE - 1n;
+  return publicClient.readContract({
+    address: hook,
+    abi: LEASH_HOOK_ABI,
+    functionName: "priceLimit",
+    args: [poolId, zeroForOne, slippageBps],
+  });
+}
+
+/** "slippage 50 bps (policy max 100)", "slippage unbounded (no policy)". */
+export function slippageText(slippageBps: bigint | null, policyMax: bigint | null): string {
+  const policy = policyMax === null ? "no policy" : `policy max ${policyMax}`;
+  return slippageBps === null ? `slippage unbounded (${policy})` : `slippage ${slippageBps} bps (${policy})`;
+}
 
 export async function tokenMeta(
   client: TickContext["publicClient"],

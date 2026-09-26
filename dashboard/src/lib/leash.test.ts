@@ -15,6 +15,7 @@ import {
   namehash,
   parseConfig,
   parseDeployments,
+  parseSlippageRecord,
   parseTokenList,
   remaining,
   spentFraction,
@@ -161,5 +162,22 @@ describe("blockRanges", () => {
     ]);
     expect(blockRanges(5n, 5n, 1000n)).toEqual([{ from: 5n, to: 5n }]);
     expect(blockRanges(6n, 5n, 1000n)).toEqual([]);
+  });
+});
+
+describe("parseSlippageRecord", () => {
+  test("empty means not enforced", () => {
+    expect(parseSlippageRecord("")).toEqual({ bps: null, error: null });
+  });
+  test("base 10 below 10000", () => {
+    expect(parseSlippageRecord("100")).toEqual({ bps: 100n, error: null });
+    expect(parseSlippageRecord("0")).toEqual({ bps: 0n, error: null });
+    expect(parseSlippageRecord("9999")).toEqual({ bps: 9999n, error: null });
+  });
+  test("anything the hook rejects is an error, never 'not bounded'", () => {
+    expect(parseSlippageRecord("1%").error).toContain("malformed");
+    expect(parseSlippageRecord(" 100").error).toContain("malformed");
+    expect(parseSlippageRecord("10000").error).toContain("out of range");
+    expect(parseSlippageRecord("10000").bps).toBeNull();
   });
 });

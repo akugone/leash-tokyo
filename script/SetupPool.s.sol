@@ -26,7 +26,8 @@ contract SetupPool is DeploymentsScript {
     uint160 internal constant SQRT_PRICE_1_1 = 79_228_162_514_264_337_593_543_950_336;
     int24 internal constant TICK_LOWER = -887_220;
     int24 internal constant TICK_UPPER = 887_220;
-    int256 internal constant LIQUIDITY_DELTA = 1000e18;
+    /// @dev Deep enough that a 300 lUSD swap moves the price about 0.3%, well inside the 1% `leash.maxSlippageBps`.
+    int256 internal constant LIQUIDITY_DELTA = 200_000e18;
     uint256 internal constant OWNER_MINT = 1_000_000e18;
     uint256 internal constant AGENT_MINT = 100_000e18;
 

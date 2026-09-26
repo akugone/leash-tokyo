@@ -22,8 +22,8 @@ Leash turns an ENS name into the agent's credential, and a Uniswap v4 hook into 
 
 1. The organisation owns `acme.eth` and deploys its own **Permissioned Registry**.
 2. Each agent is issued a revocable subname with an expiry: `trader-1.acme.eth`.
-3. The agent's risk policy lives in its **Permissioned Resolver**: the agent address is the name's native `addr` record, and the daily notional cap and allowed tokens are text records, `leash.quote`, `leash.dailyNotional` and `leash.tokens`.
-4. **Enhanced Access Control** lets a `risk-manager` role hold `ROLE_SET_TEXT` scoped to just the `leash.dailyNotional` and `leash.tokens` keys, never the name itself. Only the owner can revoke that role.
+3. The agent's risk policy lives in its **Permissioned Resolver**: the agent address is the name's native `addr` record, and the daily notional cap, allowed tokens and maximum price impact per swap are text records, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps`.
+4. **Enhanced Access Control** lets a `risk-manager` role hold `ROLE_SET_TEXT` scoped to just the `leash.dailyNotional` and `leash.tokens` keys, never the name itself, nor the owner-only `leash.maxSlippageBps`. Only the owner can revoke that role.
 5. The agent signs an EIP-712 `SwapIntent` (name, pool, direction, amount, nonce, deadline). `hookData` carries the label, the intent and the signature. A **Uniswap v4 hook** recovers the signer and compares it to the name's `addr` record: `beforeSwap` checks identity and the token allowlist, `afterSwap` counts the real quote token delta against the daily cap. No trusted router, any Uniswap v4 router works.
 
 Revoking the subname is an instant kill switch. No key rotation, no redeploy, one transaction.
@@ -43,7 +43,7 @@ sequenceDiagram
 
     Note over Ops,Res: Setup
     Ops->>Reg: register subname trader-1 (expiry)
-    Ops->>Res: write records (addr, leash.quote, leash.dailyNotional, leash.tokens)
+    Ops->>Res: write records (addr, leash.quote, leash.dailyNotional, leash.tokens, leash.maxSlippageBps)
     Ops->>Res: grantSetterRoles(scoped ROLE_SET_TEXT, Risk)
 
     Note over Agent,Hook: Swap path

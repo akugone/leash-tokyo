@@ -19,6 +19,7 @@ import {
   dnsEncode,
   labelId,
   lookbackStart,
+  parseSlippageRecord,
   parseTokenList,
   textCalldata,
   type Deployments,
@@ -35,6 +36,10 @@ export type Policy = {
   cap: bigint;
   tokens: Address[];
   expiry: bigint;
+  /// `leash.maxSlippageBps`, null when the record is empty (or the hook predates the bound) and nothing is enforced.
+  maxSlippageBps: bigint | null;
+  /// Set when the record is malformed: the hook then reverts `InvalidRecord` on every swap.
+  maxSlippageError: string | null;
   /// "hook" when read through `policy()`, "resolver" when read directly (the hook reverted).
   source: "hook" | "resolver";
 };
@@ -104,6 +109,22 @@ function isLeashRevoked(err: unknown): boolean {
   );
 }
 
+/// `maxSlippageBps(label)` result for the policy. A revert without a known error is a hook deployed before the
+/// bound existed: nothing enforced. `InvalidRecord` means every swap fails, so it is kept as an error.
+function slippageFromHook(
+  res: Field<readonly [boolean, bigint]>,
+): Pick<Policy, "maxSlippageBps" | "maxSlippageError"> {
+  if (res.value)
+    return { maxSlippageBps: res.value[0] ? res.value[1] : null, maxSlippageError: null };
+  if (res.error.startsWith("InvalidRecord")) {
+    return {
+      maxSlippageBps: null,
+      maxSlippageError: "malformed record, the hook rejects every swap",
+    };
+  }
+  return { maxSlippageBps: null, maxSlippageError: null };
+}
+
 async function field<T>(p: Promise<T>): Promise<Field<T>> {
   try {
     return { value: await p, error: null };
@@ -127,19 +148,23 @@ async function readPolicyFromResolver(
       functionName: "resolve",
       args: [dnsName, data],
     });
-  const [agentRaw, quoteRaw, capRaw, tokensRaw] = await Promise.all([
+  const [agentRaw, quoteRaw, capRaw, tokensRaw, slippageRaw] = await Promise.all([
     call(addrCalldata()),
     call(textCalldata("leash.quote")),
     call(textCalldata("leash.dailyNotional")),
     call(textCalldata("leash.tokens")),
+    call(textCalldata("leash.maxSlippageBps")),
   ]);
   const capText = decodeText(capRaw).trim();
+  const slippage = parseSlippageRecord(decodeText(slippageRaw));
   return {
     agent: decodeAddr(agentRaw),
     quote: decodeText(quoteRaw).trim() as Address,
     cap: capText ? BigInt(capText) : 0n,
     tokens: parseTokenList(decodeText(tokensRaw)),
     expiry,
+    maxSlippageBps: slippage.bps,
+    maxSlippageError: slippage.error,
     source: "resolver",
   };
 }
@@ -199,7 +224,7 @@ export async function fetchSnapshot(
   const hook = { address: deployments.hook, abi: hookAbi } as const;
 
   const blockP = field(client.getBlock({ blockTag: "latest" }));
-  const [block, owner, expiry, resolver, policyRaw, spentToday, remainingToday, nonce] =
+  const [block, owner, expiry, resolver, policyRaw, spentToday, remainingToday, nonce, slippage] =
     await Promise.all([
       blockP,
       field(client.readContract({ ...registry, functionName: "getOwner", args: [id] })),
@@ -212,6 +237,7 @@ export async function fetchSnapshot(
       field(client.readContract({ ...hook, functionName: "spentToday", args: [node] })),
       field(client.readContract({ ...hook, functionName: "remainingToday", args: [label] })),
       field(client.readContract({ ...hook, functionName: "nonces", args: [node] })),
+      field(client.readContract({ ...hook, functionName: "maxSlippageBps", args: [label] })),
     ]);
 
   let policy: Field<Policy>;
@@ -219,7 +245,15 @@ export async function fetchSnapshot(
   if (policyRaw.ok) {
     const [agent, quote, cap, tokens, exp] = policyRaw.value;
     policy = {
-      value: { agent, quote, cap, tokens: [...tokens], expiry: BigInt(exp), source: "hook" },
+      value: {
+        agent,
+        quote,
+        cap,
+        tokens: [...tokens],
+        expiry: BigInt(exp),
+        ...slippageFromHook(slippage),
+        source: "hook",
+      },
       error: null,
     };
   } else {

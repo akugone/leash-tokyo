@@ -4,8 +4,9 @@ import { resolve } from "node:path";
 import { encodeErrorResult, keccak256, toHex, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { LEASH_HOOK_ABI, WRAPPED_ERROR_ABI } from "./abi.ts";
-import { FORCE_DEFAULT_AMOUNT, chooseAmount, parseCliArgs } from "./bot.ts";
+import { FORCE_DEFAULT_AMOUNT, chooseAmount, chooseSlippage, parseCliArgs, slippageText } from "./bot.ts";
 import { decodeRevertData, explainRevert } from "./errors.ts";
+import { bpsText } from "./leash.ts";
 import {
   dnsEncode,
   domainSeparator,
@@ -106,6 +107,15 @@ describe("errors", () => {
     );
   });
 
+  test("decodes SlippageTooLoose", () => {
+    const reason = encodeErrorResult({ abi: LEASH_HOOK_ABI, errorName: "SlippageTooLoose", args: [4295128740n, 7n] });
+    const decoded = decodeRevertData(wrap(reason));
+    expect(decoded.name).toBe("SlippageTooLoose");
+    expect(explainRevert(decoded, ctx)).toBe(
+      "SlippageTooLoose: price limit 4295128740 is wider than leash.maxSlippageBps allows (bound 7)",
+    );
+  });
+
   test("unwraps two nested WrappedError levels", () => {
     const reason = encodeErrorResult({
       abi: LEASH_HOOK_ABI,
@@ -176,5 +186,28 @@ describe("bot", () => {
       interval: 15,
     });
     expect(parseCliArgs(["--force"]).force).toBe(true);
+    expect(parseCliArgs(["--slippage-bps", "50"]).slippageBps).toBe(50n);
+    expect(parseCliArgs([]).slippageBps).toBeUndefined();
+  });
+
+  test("chooseSlippage: request, else 90% of the policy, never clamped", () => {
+    expect(chooseSlippage(undefined, 100n)).toBe(90n);
+    expect(chooseSlippage(undefined, 5n)).toBe(4n);
+    // too small for headroom: the bound itself
+    expect(chooseSlippage(undefined, 1n)).toBe(1n);
+    expect(chooseSlippage(undefined, 0n)).toBe(0n);
+    expect(chooseSlippage(30n, 100n)).toBe(30n);
+    // wider than the policy goes out as is: the hook answers SlippageTooLoose
+    expect(chooseSlippage(500n, 100n)).toBe(500n);
+    expect(chooseSlippage(undefined, null)).toBeNull();
+    expect(chooseSlippage(0n, null)).toBe(0n);
+  });
+
+  test("slippage texts", () => {
+    expect(slippageText(50n, 100n)).toBe("slippage 50 bps (policy max 100)");
+    expect(slippageText(null, null)).toBe("slippage unbounded (no policy)");
+    expect(bpsText(100n)).toBe("100 bps (1%)");
+    expect(bpsText(25n)).toBe("25 bps (0.25%)");
+    expect(bpsText(null)).toBe("none");
   });
 });

@@ -5,12 +5,15 @@ import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 import {LeashHook} from "../src/LeashHook.sol";
 import {IPermissionedRegistry} from "../src/interfaces/ens/IPermissionedRegistry.sol";
@@ -24,11 +27,13 @@ import {MockResolver} from "./mocks/MockResolver.sol";
 ///      `block.timestamp` within a call, which breaks `vm.warp` in the middle of a test.
 contract LeashHookTest is Deployers {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
     string internal constant PARENT_NAME = "acme.eth";
     string internal constant LABEL = "trader-1";
     uint256 internal constant CAP = 1000e18;
     uint64 internal constant NAME_DURATION = 7 days;
+    uint256 internal constant MAX_SLIPPAGE_BPS = 100;
 
     LeashHook internal hook;
     MockRegistry internal registry;
@@ -374,6 +379,157 @@ contract LeashHookTest is Deployers {
         assertEq(hook.nonces(node), 1);
     }
 
+    // ============ Slippage Tests ============
+
+    function test_MaxSlippageBps_NotEnforcedWhenEmpty() public view {
+        (bool enforced, uint256 bps) = hook.maxSlippageBps(LABEL);
+        assertFalse(enforced);
+        assertEq(bps, 0);
+    }
+
+    function test_MaxSlippageBps() public {
+        _setMaxSlippage("100");
+        (bool enforced, uint256 bps) = hook.maxSlippageBps(LABEL);
+        assertTrue(enforced);
+        assertEq(bps, 100);
+    }
+
+    function test_RevertWhen_MaxSlippageBps_LeashRevoked() public {
+        registry.revoke(LABEL);
+        vm.expectRevert(abi.encodeWithSelector(LeashHook.LeashRevoked.selector, node, uint64(vm.getBlockTimestamp())));
+        hook.maxSlippageBps(LABEL);
+    }
+
+    function test_PriceLimit() public view {
+        // Pool starts at price 1: sqrtPriceX96 = 2^96. 1% down is sqrt(0.99), 1% up is sqrt(1.01).
+        assertApproxEqRel(hook.priceLimit(poolId, true, 100), uint256(SQRT_PRICE_1_1) * 994_987 / 1_000_000, 1e12);
+        assertApproxEqRel(hook.priceLimit(poolId, false, 100), uint256(SQRT_PRICE_1_1) * 1_004_987 / 1_000_000, 1e12);
+        assertEq(hook.priceLimit(poolId, true, 0), SQRT_PRICE_1_1);
+        assertEq(hook.priceLimit(poolId, false, 0), SQRT_PRICE_1_1);
+    }
+
+    function test_PriceLimit_WholeRange() public view {
+        assertEq(hook.priceLimit(poolId, true, 9999), uint256(SQRT_PRICE_1_1) / 100);
+        assertEq(hook.priceLimit(poolId, true, 10_000), TickMath.MIN_SQRT_PRICE + 1);
+        assertEq(hook.priceLimit(poolId, true, type(uint256).max), TickMath.MIN_SQRT_PRICE + 1);
+    }
+
+    function test_PriceLimit_ClampedAtMaxPrice() public {
+        // From a high price, a huge move up lands past MAX_SQRT_PRICE and is clamped.
+        (, PoolId highId) = initPool(currency0, currency1, IHooks(hook), 500, TickMath.getSqrtPriceAtTick(800_000));
+        assertEq(hook.priceLimit(highId, false, type(uint256).max), TickMath.MAX_SQRT_PRICE - 1);
+    }
+
+    function testFuzz_PriceLimit_NeverReverts(bool zeroForOne, uint256 bps) public view {
+        uint160 limit = hook.priceLimit(poolId, zeroForOne, bps);
+        assertGt(limit, TickMath.MIN_SQRT_PRICE);
+        assertLt(limit, TickMath.MAX_SQRT_PRICE);
+    }
+
+    function test_Swap_NoSlippageRecordAcceptsAnyLimit() public {
+        _swap(-int256(1e18), 0);
+        assertEq(hook.nonces(node), 1);
+    }
+
+    function test_Swap_AtPolicyLimit() public {
+        _setMaxSlippage("100");
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        _swapWithLimit(intent, _signedHookData(LABEL, intent, agentPk), hook.priceLimit(poolId, true, MAX_SLIPPAGE_BPS));
+        assertEq(hook.spentToday(node), 1e18);
+    }
+
+    function test_Swap_TighterThanPolicy() public {
+        _setMaxSlippage("100");
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        _swapWithLimit(intent, _signedHookData(LABEL, intent, agentPk), hook.priceLimit(poolId, true, 30));
+        assertEq(hook.spentToday(node), 1e18);
+    }
+
+    function test_Swap_OneForZeroAtPolicyLimit() public {
+        _setMaxSlippage("100");
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        intent.zeroForOne = false;
+        _swapWithLimit(
+            intent, _signedHookData(LABEL, intent, agentPk), hook.priceLimit(poolId, false, MAX_SLIPPAGE_BPS)
+        );
+        assertGt(hook.spentToday(node), 0);
+    }
+
+    /// @dev A limit inside the bound stops the swap there: exact input is filled partially, the cap counts what moved.
+    function test_Swap_PartialFillStopsAtLimit() public {
+        _setMaxSlippage("100");
+        uint160 limit = hook.priceLimit(poolId, true, 10);
+        SwapIntent memory intent = _intent(-int256(CAP), 0);
+        _swapWithLimit(intent, _signedHookData(LABEL, intent, agentPk), limit);
+        (uint160 sqrtPriceX96,,,) = manager.getSlot0(poolId);
+        assertEq(sqrtPriceX96, limit);
+        assertGt(hook.spentToday(node), 0);
+        assertLt(hook.spentToday(node), CAP);
+    }
+
+    function test_RevertWhen_Swap_SlippageTooLoose() public {
+        _setMaxSlippage("100");
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        uint160 bound = hook.priceLimit(poolId, true, MAX_SLIPPAGE_BPS);
+        _expectHookRevert(
+            IHooks.beforeSwap.selector,
+            abi.encodeWithSelector(LeashHook.SlippageTooLoose.selector, MIN_PRICE_LIMIT, bound)
+        );
+        _swapRaw(intent, hookData);
+    }
+
+    function test_RevertWhen_Swap_SlippageTooLoose_OneForZero() public {
+        _setMaxSlippage("100");
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        intent.zeroForOne = false;
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        uint160 bound = hook.priceLimit(poolId, false, MAX_SLIPPAGE_BPS);
+        _expectHookRevert(
+            IHooks.beforeSwap.selector, abi.encodeWithSelector(LeashHook.SlippageTooLoose.selector, bound + 1, bound)
+        );
+        _swapWithLimit(intent, hookData, bound + 1);
+    }
+
+    function test_RevertWhen_Swap_SlippageRecordOutOfRange() public {
+        _setMaxSlippage("10000");
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        string memory keyName = hook.KEY_MAX_SLIPPAGE_BPS();
+        _expectHookRevert(
+            IHooks.beforeSwap.selector, abi.encodeWithSelector(LeashPolicyLib.InvalidRecord.selector, keyName)
+        );
+        _swapRaw(intent, hookData);
+    }
+
+    function test_RevertWhen_Swap_SlippageRecordMalformed() public {
+        _setMaxSlippage("1%");
+        SwapIntent memory intent = _intent(-int256(1e18), 0);
+        bytes memory hookData = _signedHookData(LABEL, intent, agentPk);
+        string memory keyName = hook.KEY_MAX_SLIPPAGE_BPS();
+        _expectHookRevert(
+            IHooks.beforeSwap.selector, abi.encodeWithSelector(LeashPolicyLib.InvalidRecord.selector, keyName)
+        );
+        _swapRaw(intent, hookData);
+    }
+
+    function testFuzz_Swap_SlippageBound(uint256 bps) public {
+        bps = bound(bps, 1, 9999);
+        _setMaxSlippage(vm.toString(bps));
+        uint160 limit = hook.priceLimit(poolId, true, bps);
+
+        SwapIntent memory loose = _intent(-int256(1e18), 0);
+        bytes memory looseData = _signedHookData(LABEL, loose, agentPk);
+        _expectHookRevert(
+            IHooks.beforeSwap.selector, abi.encodeWithSelector(LeashHook.SlippageTooLoose.selector, limit - 1, limit)
+        );
+        _swapWithLimit(loose, looseData, limit - 1);
+
+        SwapIntent memory ok = _intent(-int256(1e18), 0);
+        _swapWithLimit(ok, _signedHookData(LABEL, ok, agentPk), limit);
+        assertEq(hook.nonces(node), 1);
+    }
+
     // ============ Helpers ============
 
     function _intent(int256 amountSpecified, uint256 nonce) internal view returns (SwapIntent memory) {
@@ -416,6 +572,27 @@ contract LeashHookTest is Deployers {
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             hookData
         );
+    }
+
+    /// @dev Same as `_swapRaw` with an explicit `sqrtPriceLimitX96`.
+    function _swapWithLimit(SwapIntent memory intent, bytes memory hookData, uint160 sqrtPriceLimitX96)
+        internal
+        returns (BalanceDelta)
+    {
+        return swapRouter.swap(
+            key,
+            SwapParams({
+                zeroForOne: intent.zeroForOne,
+                amountSpecified: intent.amountSpecified,
+                sqrtPriceLimitX96: sqrtPriceLimitX96
+            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            hookData
+        );
+    }
+
+    function _setMaxSlippage(string memory value) internal {
+        resolver.setText(dnsName, hook.KEY_MAX_SLIPPAGE_BPS(), value);
     }
 
     /// @dev PoolManager wraps hook reverts in `CustomRevert.WrappedError(hook, hookSelector, reason, HookCallFailed)`.
