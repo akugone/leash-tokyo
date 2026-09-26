@@ -117,8 +117,8 @@ contract LeashHookTest is LeashHookBase {
 
     function test_AgentName() public view {
         (bytes memory dns, bytes32 n) = hook.agentName(LABEL);
-        assertEq(dns, EnsNameLib.dnsEncodeName("trader-1.acme.eth"));
-        assertEq(n, EnsNameLib.namehash("trader-1.acme.eth"));
+        assertEq(dns, EnsNameLib.dnsEncodeName("trader-1.leash.eth"));
+        assertEq(n, EnsNameLib.namehash("trader-1.leash.eth"));
     }
 
     // ============ beforeSwap / afterSwap (swap) Tests ============

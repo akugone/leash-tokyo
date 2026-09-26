@@ -15,25 +15,25 @@ contract EnsNameLibTest is Test {
     // ============ childNode Tests ============
 
     function test_ChildNode_MatchesNamehash() public pure {
-        bytes32 parent = EnsNameLib.namehash("acme.eth");
-        assertEq(EnsNameLib.childNode(parent, "trader-1"), EnsNameLib.namehash("trader-1.acme.eth"));
+        bytes32 parent = EnsNameLib.namehash("leash.eth");
+        assertEq(EnsNameLib.childNode(parent, "trader-1"), EnsNameLib.namehash("trader-1.leash.eth"));
     }
 
     // ============ dnsEncode Tests ============
 
     function test_DnsEncode() public pure {
-        bytes memory parent = EnsNameLib.dnsEncodeName("acme.eth");
-        assertEq(parent, hex"04" hex"61636d65" hex"03" hex"657468" hex"00");
+        bytes memory parent = EnsNameLib.dnsEncodeName("leash.eth");
+        assertEq(parent, hex"05" hex"6c65617368" hex"03" hex"657468" hex"00");
         assertEq(
             EnsNameLib.dnsEncode("trader-1", parent),
-            hex"08" hex"7472616465722d31" hex"04" hex"61636d65" hex"03" hex"657468" hex"00"
+            hex"08" hex"7472616465722d31" hex"05" hex"6c65617368" hex"03" hex"657468" hex"00"
         );
     }
 
     function test_DnsEncodeName_MatchesDnsEncode() public pure {
         assertEq(
-            EnsNameLib.dnsEncodeName("trader-1.acme.eth"),
-            EnsNameLib.dnsEncode("trader-1", EnsNameLib.dnsEncodeName("acme.eth"))
+            EnsNameLib.dnsEncodeName("trader-1.leash.eth"),
+            EnsNameLib.dnsEncode("trader-1", EnsNameLib.dnsEncodeName("leash.eth"))
         );
     }
 
@@ -44,7 +44,7 @@ contract EnsNameLibTest is Test {
 
     function test_RevertWhen_DnsEncodeName_EmptyLabel() public {
         vm.expectRevert(EnsNameLib.EmptyLabel.selector);
-        this.dnsEncodeNameExternal("acme..eth");
+        this.dnsEncodeNameExternal("leash..eth");
     }
 
     // ============ namehash Tests ============
@@ -61,9 +61,9 @@ contract EnsNameLibTest is Test {
         for (uint256 i = 0; i < bytes(label).length; i++) {
             vm.assume(bytes(label)[i] != ".");
         }
-        bytes32 parent = EnsNameLib.namehash("acme.eth");
+        bytes32 parent = EnsNameLib.namehash("leash.eth");
         assertEq(
-            EnsNameLib.namehash(string.concat(label, ".acme.eth")),
+            EnsNameLib.namehash(string.concat(label, ".leash.eth")),
             keccak256(abi.encodePacked(parent, keccak256(bytes(label))))
         );
     }

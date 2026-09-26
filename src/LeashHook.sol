@@ -59,12 +59,12 @@ contract LeashHook is BaseHook {
 
     /// @notice Org registry that issues agent subnames under `PARENT_NODE`.
     IPermissionedRegistry public immutable ORG_REGISTRY;
-    /// @notice `namehash(parentName)`, e.g. `namehash("acme.eth")`.
+    /// @notice `namehash(parentName)`, e.g. `namehash("leash.eth")`.
     bytes32 public immutable PARENT_NODE;
 
     // ============ Storage ============
 
-    /// @dev DNS-encoded parent name, e.g. `\x04acme\x03eth\x00`. Exposed through `parentDnsName()`.
+    /// @dev DNS-encoded parent name, e.g. `\x05leash\x03eth\x00`. Exposed through `parentDnsName()`.
     bytes internal _parentDnsName;
 
     /// @notice Next expected intent nonce per agent node.
@@ -97,7 +97,7 @@ contract LeashHook is BaseHook {
 
     /// @param poolManager Uniswap v4 PoolManager.
     /// @param orgRegistry ENSv2 registry holding the agent subnames.
-    /// @param parentName Dotted parent name, e.g. `acme.eth`.
+    /// @param parentName Dotted parent name, e.g. `leash.eth`.
     constructor(IPoolManager poolManager, IPermissionedRegistry orgRegistry, string memory parentName)
         BaseHook(poolManager)
     {

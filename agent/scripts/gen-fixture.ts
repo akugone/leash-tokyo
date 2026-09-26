@@ -23,7 +23,7 @@ const PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf
 const CHAIN_ID = 11155111;
 const VERIFYING_CONTRACT: Address = "0x1000000000000000000000000000000000000001";
 const LABEL = "trader-1";
-const NAME = `${LABEL}.leashdemo.eth`;
+const NAME = `${LABEL}.leash.eth`;
 
 const intent: SwapIntent = {
   node: namehash(NAME),

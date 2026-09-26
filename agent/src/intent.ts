@@ -106,7 +106,7 @@ export function encodeHookData(label: string, intent: SwapIntent, signature: Hex
   return encodeAbiParameters(HOOK_DATA_PARAMS, [label, intent, signature]);
 }
 
-/** ENS namehash of a dotted name, e.g. `trader-1.leashdemo.eth`. Same as `EnsNameLib.namehash`. */
+/** ENS namehash of a dotted name, e.g. `trader-1.leash.eth`. Same as `EnsNameLib.namehash`. */
 export function namehash(name: string): Hex {
   return viemNamehash(name);
 }
@@ -116,7 +116,7 @@ export function labelhash(label: string): Hex {
   return keccak256(toHex(label));
 }
 
-/** DNS wire encoding with trailing zero byte, e.g. `\x08trader-1\x09leashdemo\x03eth\x00`. */
+/** DNS wire encoding with trailing zero byte, e.g. `\x08trader-1\x05leash\x03eth\x00`. */
 export function dnsEncode(name: string): Hex {
   return toHex(packetToBytes(name));
 }

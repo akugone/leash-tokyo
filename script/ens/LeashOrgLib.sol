@@ -74,7 +74,7 @@ library LeashOrgLib {
     }
 
     /// @notice Calls for `resolver.multicall` writing the whole policy of one agent name.
-    /// @param dnsName DNS-encoded full name, e.g. `\x08trader-1\x09leashdemo\x03eth\x00`.
+    /// @param dnsName DNS-encoded full name, e.g. `\x08trader-1\x05leash\x03eth\x00`.
     /// @param agent Address the agent signs with; stored as the ETH address record.
     /// @param quote Quote token the notional cap is denominated in.
     /// @param cap Daily notional cap in quote units, written as a decimal string.

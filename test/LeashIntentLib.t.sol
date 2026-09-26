@@ -135,7 +135,7 @@ contract LeashIntentLibTest is Test {
     // ============ encodeHookData / decodeHookData Tests ============
 
     function test_EncodeDecodeHookData_RoundTrip() public pure {
-        string memory label = "agent-42.acme.eth";
+        string memory label = "agent-42.leash.eth";
         SwapIntent memory intent = SwapIntent({
             node: bytes32(uint256(0xABCDEF)),
             poolId: bytes32(uint256(0x123456)),

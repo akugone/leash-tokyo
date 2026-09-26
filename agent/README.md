@@ -70,9 +70,9 @@ Each tick prints one status line (agent, cap, remaining today, nonce, expiry), t
 the new `spentToday`, or the decoded hook revert, for example:
 
 ```
-[2026-09-21 18:04:11] trader-1.leashdemo.eth agent=0x3C44...93BC cap=1000 USDC remaining=400 USDC nonce=3 expires 2026-10-19T18:00:00.000Z
-  MISBEHAVE swap 400.000001 USDC exact in, 0->1, deadline 1758477251
-  REVERT DailyCapExceeded: trader-1.leashdemo.eth would reach 1000000001 of cap 1000000000 today
+[2026-09-26 18:04:11] trader-1.leash.eth agent=0xA162DbFfd5c4171Fb7058FEAa7a28F5c63C44A0d cap=250 lUSD remaining=100 lUSD nonce=3 expires 2026-10-26T07:37:00.000Z
+  MISBEHAVE swap 100.000000000000000001 lUSD exact in, 0->1, slippage 100 bps (policy max 100), deadline 1790446151
+  REVERT DailyCapExceeded: trader-1.leash.eth would reach 250000000000000000001 of cap 250000000000000000000 today
 ```
 
 The swap is always simulated first (`simulateContract`) so a revert costs no gas and the reason is decoded
