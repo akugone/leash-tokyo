@@ -120,14 +120,18 @@ export const DEFAULT_CONFIG: DashboardConfig = {
   label: "trader-1",
 };
 
+/// Hosted build: the RPC and deployments are pinned, so a crafted link cannot point the wallet at other contracts.
+export const LOCKED: boolean = import.meta.env?.PROD === true;
+
 export function parseConfig(
   search: string,
   defaults: DashboardConfig = DEFAULT_CONFIG,
+  locked: boolean = LOCKED,
 ): DashboardConfig {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   return {
-    rpc: params.get("rpc") || defaults.rpc,
-    deployments: params.get("deployments") || defaults.deployments,
+    rpc: (!locked && params.get("rpc")) || defaults.rpc,
+    deployments: (!locked && params.get("deployments")) || defaults.deployments,
     label: params.get("label") || defaults.label,
   };
 }

@@ -5,6 +5,7 @@ import { fetchSnapshot, makeClient, POLL_MS, type Snapshot } from "./lib/chain";
 import {
   configToSearch,
   parseConfig,
+  LOCKED,
   parseDeployments,
   type DashboardConfig,
   type Deployments,
@@ -13,6 +14,7 @@ import {
 const OVERRIDE_KEY = "leash.deployments.override";
 
 export function readOverride(): string | null {
+  if (LOCKED) return null;
   try {
     return localStorage.getItem(OVERRIDE_KEY);
   } catch {
