@@ -35,18 +35,21 @@ export const WRAPPED_ERROR_ABI = parseAbi([
   "error WrappedError(address target, bytes4 selector, bytes reason, bytes details)",
 ]);
 
-/** `PoolSwapTest.swap` from v4-core. */
-export const POOL_SWAP_TEST_ABI = parseAbi([
+/**
+ * `LeashVault.swap`, the vault's own errors, and the ERC20 error a vault short of funds bubbles up from the
+ * token transfer inside the PoolManager.
+ */
+export const LEASH_VAULT_ABI = parseAbi([
   "struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }",
   "struct SwapParams { bool zeroForOne; int256 amountSpecified; uint160 sqrtPriceLimitX96; }",
-  "struct TestSettings { bool takeClaims; bool settleUsingBurn; }",
-  "function swap(PoolKey key, SwapParams params, TestSettings testSettings, bytes hookData) payable returns (int256 delta)",
+  "function swap(PoolKey key, SwapParams params, bytes hookData) returns (int256 delta)",
+  "error NotLeashPool(address hooks)",
+  "error NotSigner(address signer, address caller)",
+  "error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)",
 ]);
 
 export const ERC20_ABI = parseAbi([
   "function balanceOf(address owner) view returns (uint256)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
   "function decimals() view returns (uint8)",
   "function symbol() view returns (string)",
 ]);

@@ -1,6 +1,6 @@
 /**
- * Leash agent client: read the policy the hook enforces for a name, swap through Uniswap v4 with a
- * signed `SwapIntent`, and report every step to the dashboard's agent feed. Shared by the MCP server
+ * Leash agent client: read the policy the hook enforces for a name, swap the org vault's tokens through
+ * Uniswap v4 with a signed `SwapIntent`, and report every step to the dashboard's agent feed. Shared by the MCP server
  * (`mcp.ts`) and usable from any other agent runtime.
  */
 import {
@@ -16,16 +16,8 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
-import { LEASH_HOOK_ABI, POOL_SWAP_TEST_ABI } from "./abi.ts";
-import {
-  POOL_SWAP_TEST,
-  chooseSlippage,
-  ensureAllowance,
-  priceLimitFor,
-  slippageText,
-  tokenMeta,
-  type Deployments,
-} from "./bot.ts";
+import { LEASH_HOOK_ABI, LEASH_VAULT_ABI } from "./abi.ts";
+import { chooseSlippage, priceLimitFor, slippageText, tokenMeta, vaultSwapArgs, type Deployments } from "./bot.ts";
 import { decodeRevertData, explainRevert, revertDataFromError } from "./errors.ts";
 import { encodeHookData, leashDomain, namehash, signIntent, type SwapIntent } from "./intent.ts";
 
@@ -223,39 +215,13 @@ export class LeashClient {
       text: `signed SwapIntent: ${amountText} exact in, ${quoteIsToken0 ? "0->1" : "1->0"}, ${slippageText(slippageBps, state.maxSlippageBps)}, nonce ${state.nonce}`,
     });
 
-    await ensureAllowance(
-      this.publicClient,
-      this.walletClient,
-      this.account.address,
-      state.quote.address,
-      amount,
-      state.quote.symbol,
-    );
-
-    const swapArgs = [
-      {
-        currency0: deployments.token0,
-        currency1: deployments.token1,
-        fee: Number(deployments.fee),
-        tickSpacing: Number(deployments.tickSpacing),
-        hooks: deployments.hook,
-      },
-      {
-        zeroForOne: intent.zeroForOne,
-        amountSpecified: intent.amountSpecified,
-        sqrtPriceLimitX96,
-      },
-      { takeClaims: false, settleUsingBurn: false },
-      hookData,
-    ] as const;
-
     let request;
     try {
       ({ request } = await this.publicClient.simulateContract({
-        address: POOL_SWAP_TEST,
-        abi: POOL_SWAP_TEST_ABI,
+        address: deployments.vault,
+        abi: LEASH_VAULT_ABI,
         functionName: "swap",
-        args: swapArgs,
+        args: vaultSwapArgs(deployments, intent, sqrtPriceLimitX96, hookData),
         account: this.account,
       }));
     } catch (err) {

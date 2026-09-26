@@ -7,7 +7,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { LEASH_HOOK_ABI, WRAPPED_ERROR_ABI } from "./abi.ts";
+import { LEASH_HOOK_ABI, LEASH_VAULT_ABI, WRAPPED_ERROR_ABI } from "./abi.ts";
 
 export type DecodedRevert = {
   /** Error name, `Unknown` when the selector matches nothing we know. */
@@ -33,7 +33,7 @@ const ERROR_STRING_SELECTOR = "0x08c379a0" as const; // Error(string)
 const PANIC_SELECTOR = "0x4e487b71" as const; // Panic(uint256)
 
 /**
- * Unwrap nested ERC-7751 `WrappedError` payloads and decode the innermost reason with the hook ABI.
+ * Unwrap nested ERC-7751 `WrappedError` payloads and decode the innermost reason with the hook and vault ABIs.
  * Falls back to `Error(string)` and `Panic(uint256)` so plain reverts also get a name.
  */
 export function decodeRevertData(data: Hex): DecodedRevert {
@@ -60,7 +60,7 @@ export function decodeRevertData(data: Hex): DecodedRevert {
     return { name: "Panic", args: decoded.args ?? [], target, data: current };
   }
   try {
-    const decoded = decodeErrorResult({ abi: LEASH_HOOK_ABI, data: current });
+    const decoded = decodeErrorResult({ abi: KNOWN_ERRORS_ABI, data: current });
     return { name: decoded.errorName, args: decoded.args ?? [], target, data: current };
   } catch {
     return { name: "Unknown", args: [], target, data: current };
@@ -110,6 +110,12 @@ export function explainRevert(decoded: DecodedRevert, ctx: NameContext): string 
       return `QuoteNotInPool: leash.quote ${a[0]} is not one of the pool currencies`;
     case "SlippageTooLoose":
       return `SlippageTooLoose: price limit ${a[0]} is wider than leash.maxSlippageBps allows (bound ${a[1]})`;
+    case "NotLeashPool":
+      return `NotLeashPool: the vault only trades on pools gated by the Leash hook, this pool has hook ${a[0]}`;
+    case "NotSigner":
+      return `NotSigner: intent signed by ${a[0]} but sent by ${a[1]}, only the signer may trade from the vault`;
+    case "ERC20InsufficientBalance":
+      return `ERC20InsufficientBalance: ${a[0]} holds ${amount(a[1], ctx)}, the swap needs ${amount(a[2], ctx)}`;
     case "InvalidRecord":
       return `InvalidRecord: text record "${a[0]}" is malformed, the hook fails closed`;
     case "Error":
@@ -137,5 +143,6 @@ function formatTimestamp(ts: bigint): string {
   return `${ts} (${new Date(Number(ts) * 1000).toISOString()})`;
 }
 
+const KNOWN_ERRORS_ABI = [...LEASH_HOOK_ABI, ...LEASH_VAULT_ABI];
 const ERROR_STRING_ABI = [{ type: "error", name: "Error", inputs: [{ name: "message", type: "string" }] }] as const;
 const PANIC_ABI = [{ type: "error", name: "Panic", inputs: [{ name: "code", type: "uint256" }] }] as const;

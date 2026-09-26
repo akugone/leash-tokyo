@@ -9,13 +9,17 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
+import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 
+import {LeashHook} from "../src/LeashHook.sol";
+import {LeashVault} from "../src/LeashVault.sol";
 import {LeashTestToken} from "../src/mocks/LeashTestToken.sol";
 import {SepoliaAddresses} from "./Addresses.sol";
 import {DeploymentsScript} from "./Deployments.sol";
 
-/// @notice Deploys the two demo tokens, initializes the hooked pool at 1:1, seeds liquidity and funds the agent.
-/// @dev Reads `hook` and `agent` from the deployments JSON, writes token0, token1, quote, fee, tickSpacing, poolId.
+/// @notice Deploys the two demo tokens, initializes the hooked pool at 1:1, seeds liquidity, deploys the org vault
+///         and funds it. The agent holds no tokens: it signs intents and trades through the vault.
+/// @dev Reads `hook` from the deployments JSON, writes token0, token1, quote, fee, tickSpacing, poolId, vault.
 ///      Run: `forge script script/SetupPool.s.sol --rpc-url sepolia --broadcast`.
 contract SetupPool is DeploymentsScript {
     using PoolIdLibrary for PoolKey;
@@ -29,20 +33,19 @@ contract SetupPool is DeploymentsScript {
     /// @dev Deep enough that a 300 lUSD swap moves the price about 0.3%, well inside the 1% `leash.maxSlippageBps`.
     int256 internal constant LIQUIDITY_DELTA = 200_000e18;
     uint256 internal constant OWNER_MINT = 1_000_000e18;
-    uint256 internal constant AGENT_MINT = 100_000e18;
+    uint256 internal constant VAULT_MINT = 100_000e18;
 
     // ============ External functions ============
 
     function run() external {
         IHooks hook = IHooks(_readAddress("hook"));
-        address agent = _readAddress("agent");
         uint256 ownerPk = vm.envUint("OWNER_PK");
         address owner = vm.addr(ownerPk);
         IPoolManager poolManager = IPoolManager(SepoliaAddresses.UNI_POOL_MANAGER);
         PoolModifyLiquidityTest liquidityRouter =
             PoolModifyLiquidityTest(SepoliaAddresses.UNI_POOL_MODIFY_LIQUIDITY_TEST);
 
-        // ---- Owner: tokens, pool, liquidity, agent funding ----
+        // ---- Owner: tokens, pool, liquidity, vault ----
         vm.startBroadcast(ownerPk);
 
         LeashTestToken lUSD = new LeashTestToken("Leash USD", "lUSD");
@@ -70,15 +73,11 @@ contract SetupPool is DeploymentsScript {
             ""
         );
 
-        token0.mint(agent, AGENT_MINT);
-        token1.mint(agent, AGENT_MINT);
+        LeashVault vault =
+            new LeashVault(LeashHook(address(hook)), PoolSwapTest(SepoliaAddresses.UNI_POOL_SWAP_TEST), owner);
+        token0.mint(address(vault), VAULT_MINT);
+        token1.mint(address(vault), VAULT_MINT);
 
-        vm.stopBroadcast();
-
-        // ---- Agent: approve the swap router ----
-        vm.startBroadcast(vm.envUint("AGENT_PK"));
-        token0.approve(SepoliaAddresses.UNI_POOL_SWAP_TEST, type(uint256).max);
-        token1.approve(SepoliaAddresses.UNI_POOL_SWAP_TEST, type(uint256).max);
         vm.stopBroadcast();
 
         // ---- Record ----
@@ -89,6 +88,7 @@ contract SetupPool is DeploymentsScript {
         _writeUint("fee", FEE);
         _writeUint("tickSpacing", uint256(int256(TICK_SPACING)));
         _writeBytes32("poolId", PoolId.unwrap(poolId));
+        _writeAddress("vault", address(vault));
 
         console.log("lUSD (quote)", address(lUSD));
         console.log("lETH", address(lETH));
@@ -98,7 +98,7 @@ contract SetupPool is DeploymentsScript {
         console.log("fee", uint256(FEE));
         console.log("tickSpacing", uint256(int256(TICK_SPACING)));
         console.log("poolId", vm.toString(PoolId.unwrap(poolId)));
+        console.log("vault", address(vault));
         console.log("owner", owner);
-        console.log("agent", agent);
     }
 }

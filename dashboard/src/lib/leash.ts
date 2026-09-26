@@ -155,6 +155,8 @@ export type Deployments = {
   orgRegistry: Address;
   orgResolver?: Address;
   hook: Address;
+  /// `LeashVault` holding the org's tokens, absent on deployments made before the vault.
+  vault?: Address;
   token0?: Address;
   token1?: Address;
   quote?: Address;
@@ -175,7 +177,15 @@ export function parseDeployments(json: unknown): Deployments {
       throw new Error(`deployments.json is missing "${key}"`);
     }
   }
-  for (const key of ["orgRegistry", "hook", "orgResolver", "orgOwner", "agent", "quote"] as const) {
+  for (const key of [
+    "orgRegistry",
+    "hook",
+    "vault",
+    "orgResolver",
+    "orgOwner",
+    "agent",
+    "quote",
+  ] as const) {
     const v = obj[key];
     if (v !== undefined && !isAddress(v as string))
       throw new Error(`deployments.${key} is not an address`);

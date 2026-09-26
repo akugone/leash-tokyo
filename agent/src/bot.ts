@@ -3,33 +3,22 @@
  *
  *   bun run src/bot.ts [--once] [--misbehave] [--amount <wei>] [--label trader-1] [--interval 15]
  *
- * Every tick: read the policy from the hook, pick an amount, sign a `SwapIntent`, swap through
- * Uniswap v4 `PoolSwapTest`. Reverts are simulated first and printed with the decoded hook error.
+ * Every tick: read the policy from the hook, pick an amount, sign a `SwapIntent`, swap through the org's
+ * `LeashVault`, which holds the tokens. Reverts are simulated first and printed with the decoded hook error.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import {
-  createPublicClient,
-  createWalletClient,
-  defineChain,
-  formatUnits,
-  http,
-  maxUint256,
-  type Address,
-  type Hex,
-} from "viem";
+import { createPublicClient, createWalletClient, defineChain, formatUnits, http, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
-import { ERC20_ABI, LEASH_HOOK_ABI, POOL_SWAP_TEST_ABI } from "./abi.ts";
+import { ERC20_ABI, LEASH_HOOK_ABI, LEASH_VAULT_ABI } from "./abi.ts";
 import { decodeRevertData, explainRevert, revertDataFromError } from "./errors.ts";
 import { encodeHookData, leashDomain, namehash, signIntent, type SwapIntent } from "./intent.ts";
 
 // ============ Constants ============
 
-/** `SepoliaAddresses.UNI_POOL_SWAP_TEST` in script/Addresses.sol. */
-export const POOL_SWAP_TEST: Address = "0x9B6b46e2c869aa39918Db7f52f5557FE577B6eEe";
 export const MIN_SQRT_PRICE = 4295128739n;
 export const MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970342n;
 const INTENT_TTL_SECONDS = 300n;
@@ -43,6 +32,8 @@ export type Deployments = {
   parentName: string;
   agentLabel: string;
   hook: Address;
+  /** `LeashVault` holding the org's tokens: the agent swaps through it and holds none itself. */
+  vault: Address;
   poolId: Hex;
   token0: Address;
   token1: Address;
@@ -158,6 +149,7 @@ export function loadDeployments(path: string): Deployments {
     "parentName",
     "agentLabel",
     "hook",
+    "vault",
     "poolId",
     "token0",
     "token1",
@@ -298,34 +290,14 @@ async function tick({ publicClient, walletClient, account, deployments, opts }: 
     `  ${opts.force ? "FORCE " : opts.misbehave ? "MISBEHAVE " : ""}swap ${fmt(amount)} exact in, ${quoteIsToken0 ? "0->1" : "1->0"}, ${slippageText(slippageBps, policyMaxSlippage)}, deadline ${deadline}`,
   );
 
-  // ---- allowance for PoolSwapTest ----
-  await ensureAllowance(publicClient, walletClient, account.address, quote, amount, quoteMeta.symbol);
-
   // ---- simulate then send ----
-  const swapArgs = [
-    {
-      currency0: deployments.token0,
-      currency1: deployments.token1,
-      fee: Number(deployments.fee),
-      tickSpacing: Number(deployments.tickSpacing),
-      hooks: hook,
-    },
-    {
-      zeroForOne: intent.zeroForOne,
-      amountSpecified: intent.amountSpecified,
-      sqrtPriceLimitX96,
-    },
-    { takeClaims: false, settleUsingBurn: false },
-    hookData,
-  ] as const;
-
   let request;
   try {
     ({ request } = await publicClient.simulateContract({
-      address: POOL_SWAP_TEST,
-      abi: POOL_SWAP_TEST_ABI,
+      address: deployments.vault,
+      abi: LEASH_VAULT_ABI,
       functionName: "swap",
-      args: swapArgs,
+      args: vaultSwapArgs(deployments, intent, sqrtPriceLimitX96, hookData),
       account,
     }));
   } catch (err) {
@@ -352,6 +324,21 @@ async function tick({ publicClient, walletClient, account, deployments, opts }: 
 }
 
 // ============ Chain helpers ============
+
+/** `LeashVault.swap` arguments: the pool from the deployments record, the swap the intent describes. */
+export function vaultSwapArgs(deployments: Deployments, intent: SwapIntent, sqrtPriceLimitX96: bigint, hookData: Hex) {
+  return [
+    {
+      currency0: deployments.token0,
+      currency1: deployments.token1,
+      fee: Number(deployments.fee),
+      tickSpacing: Number(deployments.tickSpacing),
+      hooks: deployments.hook,
+    },
+    { zeroForOne: intent.zeroForOne, amountSpecified: intent.amountSpecified, sqrtPriceLimitX96 },
+    hookData,
+  ] as const;
+}
 
 /**
  * `sqrtPriceLimitX96` for a swap: the hook's own `priceLimit` for `slippageBps` from the current pool price, so the
@@ -392,33 +379,6 @@ export async function tokenMeta(
   } catch {
     return { decimals: 18, symbol: "wei" };
   }
-}
-
-export async function ensureAllowance(
-  publicClient: TickContext["publicClient"],
-  walletClient: TickContext["walletClient"],
-  owner: Address,
-  token: Address,
-  amount: bigint,
-  symbol: string,
-): Promise<void> {
-  const allowance = await publicClient.readContract({
-    address: token,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: [owner, POOL_SWAP_TEST],
-  });
-  if (allowance >= amount) return;
-  console.log(`  approving PoolSwapTest to spend ${symbol}`);
-  const hash = await walletClient.writeContract({
-    address: token,
-    abi: ERC20_ABI,
-    functionName: "approve",
-    args: [POOL_SWAP_TEST, maxUint256],
-    account: walletClient.account!,
-    chain: walletClient.chain,
-  });
-  await publicClient.waitForTransactionReceipt({ hash });
 }
 
 async function loadDotenv(agentDir: string): Promise<void> {

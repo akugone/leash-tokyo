@@ -20,3 +20,4 @@ Every value is a JSON string. Keys:
 | `token0`, `token1`, `quote` | pool currencies, `quote` is one of the two |
 | `fee`, `tickSpacing` | pool key parameters |
 | `poolId` | `PoolId` of the demo pool |
+| `vault` | the org `LeashVault`, which holds the demo tokens the agent trades |

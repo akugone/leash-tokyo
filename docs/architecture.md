@@ -71,6 +71,20 @@ Flags: `beforeSwap | afterSwap`.
 
 The daily counter lives in the hook, keyed by `(node, day)`.
 
+### 5. Org vault
+
+`LeashVault` holds the org's tokens so the agent holds none: its key only signs intents and pays gas. Without it the agent's own balance could leave through a plain transfer or a pool without the hook, and the leash would only hold on Leash pools.
+
+`swap(key, params, hookData)`:
+
+1. `key.hooks` is the Leash hook the vault was deployed with (`NotLeashPool`), so every trade goes through the checks above.
+2. The signer of the intent in `hookData`, recovered with `hook.hashIntent`, is `msg.sender` (`NotSigner`). Without it anyone could replay an agent's pending intent against the vault's funds with a price limit of their choice. The hook then checks that signer against the `addr` record, so the caller is the agent.
+3. Swap through `PoolSwapTest`, which pulls the input from its caller and pays the output back to it: the vault settles nothing itself. Hook reverts bubble up unchanged.
+
+`withdraw(token, to, amount)` is owner only. The hook is unchanged: it ignores `sender`, the vault is just another caller of the router. ERC20 pools only.
+
+A leaked agent key can at worst trade inside the mandate, with the org's funds, until the owner cuts the leash.
+
 ## Open questions
 
 - **Who is `sender`?** Resolved. The hook ignores `sender` entirely: the agent signs an EIP-712 `SwapIntent`, and the hook recovers the signer and compares it to the name's `addr` record. Works with any v4 router.

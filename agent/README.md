@@ -1,13 +1,14 @@
 # Leash agent
 
-Small bun + viem package: the demo agent that signs EIP-712 `SwapIntent`s and swaps through the Uniswap v4
-`PoolSwapTest` router with the intent in `hookData`. It also produces the cross language fixture that
+Small bun + viem package: the demo agent that signs EIP-712 `SwapIntent`s and swaps through the org's
+`LeashVault` with the intent in `hookData`. The vault holds the tokens and calls the Uniswap v4 `PoolSwapTest`
+router, the agent key holds only gas ETH. It also produces the cross language fixture that
 `test/LeashIntentFixture.t.sol` checks against `LeashIntentLib`.
 
 ```
 agent/
   src/intent.ts       typed data, signing, hookData codec, namehash / dnsEncode helpers
-  src/abi.ts          hand written LeashHook, WrappedError, PoolSwapTest and ERC20 ABIs
+  src/abi.ts          hand written LeashHook, WrappedError, LeashVault and ERC20 ABIs
   src/errors.ts       unwraps v4-core WrappedError and explains hook errors in one line
   src/bot.ts          the CLI loop (ticket L-16)
   src/leash.ts        LeashClient: read the enforced policy, swap with a signed intent, report to the dashboard feed
@@ -75,8 +76,8 @@ the new `spentToday`, or the decoded hook revert, for example:
 ```
 
 The swap is always simulated first (`simulateContract`) so a revert costs no gas and the reason is decoded
-from the ERC-7751 `WrappedError` the PoolManager bubbles up. The first successful run approves
-`PoolSwapTest` for the quote token.
+from the ERC-7751 `WrappedError` the PoolManager bubbles up. No token approval: the vault pays, and approves the
+router itself on its first swap.
 
 ### Regenerate the EIP-712 fixture
 
