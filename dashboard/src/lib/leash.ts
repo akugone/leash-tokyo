@@ -160,6 +160,8 @@ export type Deployments = {
   hook: Address;
   /// `LeashVault` holding the org's tokens, absent on deployments made before the vault.
   vault?: Address;
+  /// The vault `script/MigrateVault.s.sol` replaced: its past refusals stay in the activity feed.
+  vaultPrevious?: Address;
   token0?: Address;
   token1?: Address;
   quote?: Address;
@@ -184,6 +186,7 @@ export function parseDeployments(json: unknown): Deployments {
     "orgRegistry",
     "hook",
     "vault",
+    "vaultPrevious",
     "orgResolver",
     "orgOwner",
     "agent",
