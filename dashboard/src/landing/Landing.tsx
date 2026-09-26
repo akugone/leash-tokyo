@@ -78,6 +78,7 @@ function Nav() {
           <a href="#solves">What it solves</a>
           <a href="#use-cases">Use cases</a>
           <a href="#how">How it works</a>
+          <a href="#hook">Hook</a>
           <a href="#start">Get started</a>
           <a href="#market">Market</a>
         </nav>
