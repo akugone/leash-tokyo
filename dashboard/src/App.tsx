@@ -7,18 +7,19 @@ import { Logo } from "./components/Logo";
 import { Settings } from "./components/Settings";
 import { StatusPill } from "./components/StatusPill";
 import { SwapTable } from "./components/SwapTable";
+import { chainNow, type ChainClock } from "./lib/chain";
 import { computeStatus, type LeashStatus } from "./lib/leash";
 import { useDashboard } from "./useDashboard";
 
 /// Chain time estimate: last block timestamp plus the wall clock elapsed since it was fetched.
-function useChainNow(blockTimestamp: bigint | null, fetchedAt: number | null): bigint | null {
+/// Chain time, ticking every second between polls. Never moves backwards, see `advanceClock`.
+function useChainNow(clock: ChainClock | null): bigint | null {
   const [, force] = useState(0);
   useEffect(() => {
     const id = setInterval(() => force((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, []);
-  if (blockTimestamp === null || fetchedAt === null) return null;
-  return blockTimestamp + BigInt(Math.floor((Date.now() - fetchedAt) / 1000));
+  return chainNow(clock, Date.now());
 }
 
 export function App() {
@@ -26,7 +27,7 @@ export function App() {
   const { config, deployments, snapshot } = dash;
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const now = useChainNow(snapshot?.blockTimestamp ?? null, snapshot?.fetchedAt ?? null);
+  const now = useChainNow(snapshot?.clock ?? null);
   const expiry = snapshot?.expiry.value ?? null;
   const status: LeashStatus =
     snapshot && now !== null

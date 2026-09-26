@@ -57,12 +57,21 @@ export type SwapRow = {
 /// One pool token held by the vault.
 export type VaultHolding = { token: Address; symbol: string; balance: bigint };
 
-export type Field<T> = { value: T; error: null } | { value: null; error: string };
+/// `transient` marks a failed read that says nothing about the chain (rate limit, timeout, network), as opposed
+/// to a contract revert. A transient failure keeps the last known value on screen.
+export type Field<T> =
+  { value: T; error: null } | { value: null; error: string; transient?: boolean };
+
+/// Chain time anchor: `timestamp` of a block seen at local time `at` (ms). Chain now is
+/// `timestamp + (Date.now() - at) / 1000`.
+export type ChainClock = { timestamp: bigint; at: number };
 
 export type Snapshot = {
   fetchedAt: number;
   blockNumber: bigint | null;
   blockTimestamp: bigint | null;
+  /// Monotonic chain clock for countdowns, see `advanceClock`.
+  clock: ChainClock | null;
   node: Hex;
   labelIdValue: bigint;
   owner: Field<Address>;
@@ -82,6 +91,11 @@ export type Snapshot = {
   scannedTo: bigint | null;
 };
 
+/// Multicall3, deployed at the same address on Sepolia and therefore on any anvil fork of it.
+const MULTICALL3: Address = "0xcA11bde05977b3631167028862bE2a173976CA11";
+
+/// One poll reads about ten views. Multicall batching folds them into one `eth_call` on the same block, which
+/// keeps a public RPC under its rate limit and makes spent, remaining and cap consistent with each other.
 export function makeClient(rpc: string, chainId: number): PublicClient {
   return createPublicClient({
     chain: {
@@ -89,9 +103,47 @@ export function makeClient(rpc: string, chainId: number): PublicClient {
       name: `chain-${chainId}`,
       nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
       rpcUrls: { default: { http: [rpc] } },
+      contracts: { multicall3: { address: MULTICALL3 } },
     },
-    transport: http(rpc, { timeout: 8_000, retryCount: 1 }),
+    batch: { multicall: { wait: 16 } },
+    transport: http(rpc, { timeout: 8_000, retryCount: 2, retryDelay: 400 }),
   });
+}
+
+/// Block timestamps lag real time by up to a block interval, by a different amount on every poll. Re-anchoring on
+/// each block would make a countdown jump back and forth. Keep the anchor that puts chain time furthest ahead:
+/// the freshest block seen so far, so chain time only moves forward.
+export function advanceClock(
+  previous: ChainClock | null,
+  block: { timestamp: bigint } | null,
+  at: number,
+): ChainClock | null {
+  if (!block) return previous;
+  const next = { timestamp: block.timestamp, at };
+  if (!previous) return next;
+  // Compare `timestamp - at / 1000` without fractions: in milliseconds.
+  const lead = (c: ChainClock) => c.timestamp * 1000n - BigInt(c.at);
+  return lead(next) >= lead(previous) ? next : previous;
+}
+
+/// Chain now in seconds from a clock, at local time `nowMs`.
+export function chainNow(clock: ChainClock | null, nowMs: number): bigint | null {
+  if (!clock) return null;
+  return clock.timestamp + BigInt(Math.floor((nowMs - clock.at) / 1000));
+}
+
+/// `next`, unless it is a transient failure and `previous` still holds a value.
+export function sticky<T>(previous: Field<T> | null | undefined, next: Field<T>): Field<T> {
+  if (next.error !== null && next.transient && previous?.value != null) return previous;
+  return next;
+}
+
+function isRevert(err: unknown): boolean {
+  return (
+    err instanceof BaseError &&
+    err.walk((e) => e instanceof ContractFunctionRevertedError) instanceof
+      ContractFunctionRevertedError
+  );
 }
 
 function errorMessage(err: unknown): string {
@@ -135,7 +187,7 @@ async function field<T>(p: Promise<T>): Promise<Field<T>> {
   try {
     return { value: await p, error: null };
   } catch (err) {
-    return { value: null, error: errorMessage(err) };
+    return { value: null, error: errorMessage(err), transient: !isRevert(err) };
   }
 }
 
@@ -252,7 +304,13 @@ export async function fetchSnapshot(
   const registry = { address: deployments.orgRegistry, abi: registryAbi } as const;
   const hook = { address: deployments.hook, abi: hookAbi } as const;
 
-  const blockP = field(client.getBlock({ blockTag: "latest" }));
+  let blockAt = Date.now();
+  const blockP = field(
+    client.getBlock({ blockTag: "latest" }).then((b) => {
+      blockAt = Date.now();
+      return b;
+    }),
+  );
   const [
     block,
     owner,
@@ -314,6 +372,11 @@ export async function fetchSnapshot(
     } else {
       policy = { value: null, error: hookError };
     }
+    // A rate limited read is not a revoked name: keep what was on screen.
+    if (!isRevert(policyRaw.err) && policy.value === null && previous?.policy.value) {
+      policy = previous.policy;
+      revokedByHook = previous.revokedByHook;
+    }
   }
 
   // Swap log scan: full lookback on the first poll, incremental afterwards.
@@ -337,19 +400,23 @@ export async function fetchSnapshot(
 
   return {
     fetchedAt: Date.now(),
-    blockNumber: block.value?.number ?? null,
-    blockTimestamp: block.value?.timestamp ?? null,
+    blockNumber: block.value?.number ?? previous?.blockNumber ?? null,
+    blockTimestamp: block.value?.timestamp ?? previous?.blockTimestamp ?? null,
+    clock: advanceClock(previous?.clock ?? null, block.value, blockAt),
     node,
     labelIdValue: id,
-    owner,
-    expiry: expiry.value !== null ? { value: BigInt(expiry.value), error: null } : expiry,
-    resolver,
+    owner: sticky(previous?.owner, owner),
+    expiry: sticky(
+      previous?.expiry,
+      expiry.value !== null ? { value: BigInt(expiry.value), error: null } : expiry,
+    ),
+    resolver: sticky(previous?.resolver, resolver),
     policy,
     revokedByHook,
-    spentToday,
-    remainingToday,
-    nonce,
-    vault,
+    spentToday: sticky(previous?.spentToday, spentToday),
+    remainingToday: sticky(previous?.remainingToday, remainingToday),
+    nonce: sticky(previous?.nonce, nonce),
+    vault: vault && previous?.vault ? sticky(previous.vault, vault) : vault,
     swaps,
     swapsError,
     scannedTo,
