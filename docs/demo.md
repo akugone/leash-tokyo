@@ -103,9 +103,15 @@ Agent terminal: `buy 5 lUSD of lETH`. Claude's `leash_policy` comes back `LeashR
 
 Say: no key rotation, no redeploy. The agent still holds its key. The key is worth nothing.
 
-## Act 6: a new agent on the spot (40 s)
+## Act 6: a new agent on the spot, its own resolver (60 s)
 
-Dashboard, **+ New agent** tab (owner): the next free name (`trader-2`) and the demo agent address are prefilled; set cap 100 lUSD, max slippage 50 bps, mandate 1 day, **Issue agent**. Three owner transactions: `VerifiableFactory.deployProxy` creates `trader-2`'s own Permissioned Resolver with `addr`, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps` written in `initialize`; `register` on the org registry points the name to it; one `multicall` on that resolver grants the risk manager its two keys. Untick **risk manager may edit this agent's cap and tokens** to issue it with no risk manager (two transactions): the Onchain facts then read `risk manager: no role on this agent`, and **tighten the leash** on `trader-2` answers `EACUnauthorizedAccountRoles`, while it still works on `trader-1`. The `trader-2 · LIVE` tab appears and opens, and the Onchain facts show its own resolver. Tabs list every name the org registry issued, from its `LabelRegistered` events.
+Dashboard, **+ New agent** tab (owner): the next free name (`trader-2`) and the demo agent address are prefilled; set cap 100 lUSD, max slippage 50 bps, mandate 1 day, **Issue agent**. Three owner transactions: `VerifiableFactory.deployProxy` creates `trader-2`'s own Permissioned Resolver with `addr`, `leash.quote`, `leash.dailyNotional`, `leash.tokens` and `leash.maxSlippageBps` written in `initialize`; `register` on the org registry points the name to it; one `multicall` on that resolver grants the risk manager its two keys. For the per agent delegation beat, leave **Give the risk manager its role** unticked (two transactions, no grant):
+
+1. The `trader-2` Onchain facts read `own resolver 0x…` and `risk manager: no role on this agent`; the risk-manager card says so too.
+2. Tab `trader-1`, risk-manager card: cap `50`, **tighten the leash**. It goes through, as in act 4: the risk manager holds its role on `trader-1`'s resolver.
+3. Tab `trader-2`, risk-manager card: cap `50`, **tighten the leash**. The dashboard simulates the write first and answers `Refused by ENS, nothing sent: EACUnauthorizedAccountRoles. The risk manager holds no role on trader-2's resolver`. No transaction, no gas, and on the hosted site no wallet is needed to watch it.
+
+Say: same risk manager, same key, same record. The difference is which resolver the owner gave it a role on. Each agent owns its data, and ENS enforces who may touch it. The `trader-2 · LIVE` tab appears and opens, and the Onchain facts show its own resolver. Tabs list every name the org registry issued, from its `LabelRegistered` events.
 
 Agent terminal: `buy 20 lUSD of lETH as trader-2`. Same key, a second name, its own mandate: `spent today 20 lUSD of 100 lUSD`, slippage requested at 45 bps (90% of 50).
 
@@ -130,8 +136,9 @@ The dashboard controls call the same contracts as `tighten`, `forbid` and `cut` 
 ## Bonus: a mandate that lapses on its own (if time remains)
 
 ```bash
-script/demo.sh short                 # issues trader-2.leash.eth with a 3 minute expiry
+script/demo.sh short                 # issues trader-2.leash.eth with a 3 minute expiry, its own resolver, no risk manager
 bun run src/bot.ts --once --label trader-2      # OK, 25 lUSD
+LABEL=trader-2 script/demo.sh tighten           # EACUnauthorizedAccountRoles: forge stops before broadcasting
 # three minutes later (on anvil: cast rpc evm_increaseTime 181 && cast rpc evm_mine)
 bun run src/bot.ts --once --label trader-2      # LeashRevoked: trader-2.leash.eth was cut at <expiry>
 ```

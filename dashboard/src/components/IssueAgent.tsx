@@ -134,8 +134,9 @@ export function IssueAgent({ parentName, draft, onIssued }: Props) {
               disabled={off}
             />
             <span>
-              risk manager may edit this agent's cap and tokens, on its resolver only (one more
-              transaction)
+              <b>Give the risk manager its role</b> on this agent: it may edit the cap and allowed
+              tokens, on this agent's resolver only (one more transaction). Untick it and the risk
+              manager's <b>tighten the leash</b> on this agent is refused by ENS.
             </span>
           </label>
         </div>

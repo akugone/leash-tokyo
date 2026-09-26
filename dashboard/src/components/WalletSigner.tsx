@@ -17,11 +17,13 @@ import {
   grantRiskManagerCall,
   issueCalls,
   liveResolver,
+  preflight,
   registryWriteAbi,
   forbiddenCalls,
   forbiddenOutcome,
   slippageCall,
   tightenCall,
+  tightenRefusalText,
   type LeashTarget,
 } from "../lib/actions";
 import { labelId, shortHex, type Deployments } from "../lib/leash";
@@ -164,8 +166,15 @@ function WalletRoles({ deployments, label, children }: Props) {
   };
 
   const actions: RoleActions = {
+    // Simulated from the risk manager's address first: a write ENS would refuse is never signed, and anyone can
+    // watch the refusal on an agent the risk manager holds no role on.
     tighten: async (cap) => {
-      const r = await send(tightenCall(await target(), cap));
+      if (!publicClient || !riskManager)
+        throw new Error("No risk manager in the deployment record.");
+      const call = tightenCall(await target(), cap);
+      const refused = await preflight(publicClient, call, riskManager as Address);
+      if (refused) return { tone: "bad", text: tightenRefusalText(label, refused) };
+      const r = await send(call);
       return {
         tone: r.ok ? "ok" : "bad",
         text: r.ok ? `Cap set to ${cap} lUSD.` : "Reverted on chain.",

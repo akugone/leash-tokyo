@@ -141,6 +141,7 @@ function serverSigner(
     actions: {
       tighten: async (cap) => {
         const r = await post("/api/demo/tighten", { cap, label });
+        if (r.status === "refused") return { tone: "bad", text: String(r.text) };
         return { tone: tone(r), text: `Cap set to ${cap} lUSD.`, txHash: String(r.txHash) };
       },
       forbid: async () => {
