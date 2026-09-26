@@ -129,7 +129,7 @@ export function App() {
         )}
         {dash.pollError && <div className="banner error">rpc: {dash.pollError}</div>}
         {!snapshot && !dash.deploymentsError && !dash.pollError && (
-          <div className="banner">Connecting to {config.rpc}…</div>
+          <div className="banner">Connecting to {shortUrl(config.rpc)}…</div>
         )}
 
         {!LOCKED && settingsOpen && (
@@ -218,7 +218,7 @@ export function App() {
             block <b className="num">{snapshot?.blockNumber?.toString() ?? "?"}</b>
           </span>
           <span>
-            rpc <b title={config.rpc}>{shortUrl(config.rpc)}</b>
+            rpc <b>{shortUrl(config.rpc)}</b>
           </span>
           <span className={dash.polling ? "pulse" : ""}>
             updated <b className="num">{lastUpdate}</b>, every 5s
