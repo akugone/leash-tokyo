@@ -2,9 +2,10 @@
 # Leash demo rehearsal on a local anvil fork of Sepolia.
 #
 # Usage:
-#   script/demo.sh anvil     # start anvil forking Sepolia (foreground, run in its own terminal)
+#   script/demo.sh anvil     # start anvil forking Sepolia a few blocks behind head, or at FORK_BLOCK (foreground)
 #   script/demo.sh fund      # give the three demo keys ETH on the fork (setup does it too)
-#   script/demo.sh setup     # act 0: register parent name, deploy registry/resolver/hook/pool, issue agent, grant risk-manager
+#   script/demo.sh setup     # act 0: register parent name, deploy registry/resolver/hook/pool, issue agent, grant risk-manager,
+#                            #   then sync the record to the dashboard and clear its activity feed
 #   script/demo.sh tighten   # act 4: risk-manager lowers the cap to NEW_CAP (default 1)
 #   script/demo.sh forbid    # act 4: risk-manager tries to revoke / re-point the agent (must fail)
 #   script/demo.sh cut       # act 5: owner cuts the leash
@@ -21,7 +22,9 @@ export FOUNDRY_DISABLE_NIGHTLY_WARNING=1
 
 RPC="${RPC_URL:-http://127.0.0.1:8545}"
 export LEASH_DEPLOYMENTS_FILE="${LEASH_DEPLOYMENTS_FILE:-deployments/anvil.json}"
-FORK_BLOCK="${FORK_BLOCK:-11752543}"
+# Empty: fork a few blocks behind the Sepolia head, which a non-archive RPC can still serve.
+FORK_BLOCK="${FORK_BLOCK:-}"
+DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:5173}"
 
 script() { # <path> [extra args]
     local path="$1"; shift
@@ -45,6 +48,10 @@ case "${1:-}" in
 anvil)
     : "${SEPOLIA_RPC_URL:?set SEPOLIA_RPC_URL in .env}"
     rm -f deployments/anvil.json
+    if [ -z "$FORK_BLOCK" ]; then
+        FORK_BLOCK=$(( $(cast block-number --rpc-url "$SEPOLIA_RPC_URL") - 5 ))
+    fi
+    echo "forking Sepolia at block $FORK_BLOCK"
     exec anvil --fork-url "$SEPOLIA_RPC_URL" --fork-block-number "$FORK_BLOCK" --block-time 2
     ;;
 fund)
@@ -73,6 +80,15 @@ setup)
     script script/ens/GrantRiskManager.s.sol
     echo "== done"
     cat "$LEASH_DEPLOYMENTS_FILE"
+    echo
+    echo "== dashboard: sync deployments, clear the activity feed"
+    mkdir -p dashboard/public
+    cp "$LEASH_DEPLOYMENTS_FILE" dashboard/public/deployments.json
+    if curl -sf -X DELETE "$DASHBOARD_URL/api/agent-events" >/dev/null; then
+        echo "feed cleared, reload $DASHBOARD_URL/?label=${AGENT_LABEL:-trader-1}"
+    else
+        echo "dashboard not running at $DASHBOARD_URL (start it with: cd dashboard && bun run dev)"
+    fi
     ;;
 tighten)
     script script/demo/TightenCap.s.sol

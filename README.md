@@ -96,7 +96,7 @@ forge build && forge test
 script/demo.sh anvil            # 1. anvil fork of Sepolia (real ENSv2 and Uniswap v4 contracts)
 script/demo.sh setup            # 2. one shot, about a minute: registers leashdemo.eth, deploys the org registry,
                                 #    resolver, hook and pool, issues trader-1.leashdemo.eth with its policy
-cd dashboard && bun run sync-deployments && bun run dev   # 3. http://localhost:5173/?label=trader-1
+cd dashboard && bun run dev    # 3. http://localhost:5173/?label=trader-1 (setup already synced the record)
 script/demo.sh agent            # 4. Claude Code as trader-1, with only the leash_policy and leash_swap tools
 ```
 
@@ -107,7 +107,7 @@ Then, side by side:
 3. Dashboard, risk-manager card: set the cap to 10 and click **tighten the leash**. Click **try to revoke**: every attempt reverts with `EACUnauthorizedAccountRoles`.
 4. Dashboard, owner card: **cut the leash**. Status flips to REVOKED. Ask the agent to trade again: `LeashRevoked`.
 
-Step by step script with expected output: [docs/demo.md](docs/demo.md). Reset between runs: restart `script/demo.sh anvil`, run `setup` again.
+Step by step script with expected output: [docs/demo.md](docs/demo.md). Reset between runs: restart `script/demo.sh anvil`, run `setup` again (it also clears the dashboard feed), reload the dashboard.
 
 ## Why ENSv2 is the product, not decoration
 

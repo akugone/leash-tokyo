@@ -2,7 +2,7 @@
 
 Two windows side by side, about three minutes. Left: a terminal where Claude Code is the trading agent, holding the trader key and two tools. Right: the dashboard, the organisation's view, with the risk-manager and owner controls. The presenter types orders to the agent and clicks the human actions; the chain arbitrates.
 
-Everything below runs against an anvil fork of Sepolia (block 11752543), talking to the real ENSv2 contracts and the real Uniswap v4 PoolManager. Only the two demo ERC20 tokens are ours. The same flow targets Sepolia itself by pointing `RPC_URL` and `LEASH_DEPLOYMENTS_FILE` at `deployments/sepolia.json`.
+Everything below runs against an anvil fork of Sepolia (a few blocks behind head, or `FORK_BLOCK`), talking to the real ENSv2 contracts and the real Uniswap v4 PoolManager. Only the two demo ERC20 tokens are ours. The same flow targets Sepolia itself by pointing `RPC_URL` and `LEASH_DEPLOYMENTS_FILE` at `deployments/sepolia.json`.
 
 ## Before the show
 
@@ -16,7 +16,7 @@ script/demo.sh anvil
 script/demo.sh setup
 
 # terminal 3: the dashboard
-cd dashboard && bun run sync-deployments && bun run dev
+cd dashboard && bun run dev
 # open http://localhost:5173/?label=trader-1
 
 # terminal 4: the agent (keep this one visible next to the browser)
@@ -140,7 +140,7 @@ cd dashboard && bun run record-demo
 
 ## Reset between rehearsals
 
-Restart `script/demo.sh anvil` (it deletes `deployments/anvil.json`) and run `setup` again, then `bun run sync-deployments` in `dashboard/`. Each run registers the same `leashdemo` label because the fork starts from the same block. The activity feed lives in the dev server's memory: `curl -X DELETE localhost:5173/api/agent-events` clears it.
+Restart `script/demo.sh anvil` (it deletes `deployments/anvil.json`) and run `setup` again: it copies the record to the dashboard and clears the activity feed (kept in the dev server's memory), then reload the page. Each run registers the same `leashdemo` label on a fresh fork.
 
 ## Sepolia run
 
