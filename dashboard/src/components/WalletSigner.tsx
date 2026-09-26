@@ -30,6 +30,7 @@ import {
   type RoleActions,
   type RoleGate,
 } from "./signer";
+import { CopyHex } from "./CopyHex";
 
 type Props = {
   projectId: string;
@@ -271,10 +272,7 @@ function WalletRoles({ deployments, label, children }: Props) {
         </p>
       ) : isConnected && address ? (
         <p>
-          Signing as <b>{role ?? "an account with no role"}</b>{" "}
-          <span className="addr" title={address}>
-            {shortHex(address)}
-          </span>
+          Signing as <b>{role ?? "an account with no role"}</b> <CopyHex value={address} />
         </p>
       ) : (
         <p>Each role signs from its own wallet. Import both accounts, then switch between them.</p>

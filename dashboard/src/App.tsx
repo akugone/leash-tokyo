@@ -189,6 +189,7 @@ export function App() {
                 swaps={snapshot?.swaps ?? []}
                 error={snapshot?.swapsError ?? null}
                 scannedTo={snapshot?.scannedTo ?? null}
+                txUrl={txUrl}
               />
             </>
           )}

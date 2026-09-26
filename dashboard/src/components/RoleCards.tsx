@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { shortHex, slippageInputError } from "../lib/leash";
+import { slippageInputError } from "../lib/leash";
 import { errorText, useSigner, type Outcome } from "./signer";
+import { CopyHex } from "./CopyHex";
 
 type Props = {
   revoked: boolean;
@@ -45,8 +46,8 @@ export function RoleCards({ revoked, onChanged, onReissue }: Props) {
         <div className="role-head">
           <h2 className="role-name">Risk manager</h2>
           {riskManager && (
-            <span className="addr hint" title={riskManager}>
-              {shortHex(riskManager)}
+            <span className="hint">
+              <CopyHex value={riskManager} />
             </span>
           )}
         </div>
@@ -91,8 +92,8 @@ export function RoleCards({ revoked, onChanged, onReissue }: Props) {
         <div className="role-head">
           <h2 className="role-name">Owner</h2>
           {owner && (
-            <span className="addr hint" title={owner}>
-              {shortHex(owner)}
+            <span className="hint">
+              <CopyHex value={owner} />
             </span>
           )}
         </div>
@@ -156,13 +157,13 @@ export function OutcomeLine({ outcome, txUrl }: { outcome: Outcome; txUrl?: stri
         <>
           {" "}
           Tx{" "}
-          {txUrl ? (
-            <a href={`${txUrl}${outcome.txHash}`} target="_blank" rel="noreferrer">
-              {shortHex(outcome.txHash, 10, 6)}
-            </a>
-          ) : (
-            shortHex(outcome.txHash, 10, 6)
-          )}
+          <CopyHex
+            value={outcome.txHash}
+            head={10}
+            tail={6}
+            what="hash"
+            href={txUrl ? `${txUrl}${outcome.txHash}` : undefined}
+          />
         </>
       )}
       {outcome.link && (
