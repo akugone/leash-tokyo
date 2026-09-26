@@ -1,9 +1,11 @@
 // Wallet mode of the role cards: the owner and the risk manager sign from their own wallet through Reown
 // AppKit. Loaded lazily, only when there is no dev server and a Reown project id is set.
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
+import { OptionsController } from "@reown/appkit-controllers";
 import { sepolia as sepoliaNetwork } from "@reown/appkit/networks";
 import { createAppKit, useAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
 import { http, type Address } from "viem";
 import { sepolia } from "viem/chains";
 import { WagmiProvider, useAccount, usePublicClient, useSwitchChain, useWalletClient } from "wagmi";
@@ -34,6 +36,9 @@ let setup: { adapter: WagmiAdapter; queryClient: QueryClient } | null = null;
 /// AppKit is created once per page. Reads and receipts go through the dashboard's own RPC.
 function appKit(projectId: string, rpc: string) {
   if (setup) return setup;
+  // createAppKit takes `enableBaseAccount` in its types but never applies it (1.8.24), and the Base Account SDK
+  // posts telemetry to cca-lite.coinbase.com on load. Set it before the adapter syncs its connectors.
+  OptionsController.setEnableBaseAccount(false);
   const adapter = new WagmiAdapter({
     networks: [sepoliaNetwork],
     projectId,
@@ -51,6 +56,11 @@ function appKit(projectId: string, rpc: string) {
       icons: [],
     },
     themeMode: "light",
+    // The modal's own network gate can hang on a wallet whose per-site network differs from the one it shows.
+    // The wallet bar below states the reported chain and switches it instead.
+    allowUnsupportedChain: true,
+    // Its SDK posts telemetry on load, and the demo roles live in MetaMask-like wallets.
+    enableCoinbase: false,
     features: {
       analytics: false,
       email: false,
@@ -98,6 +108,16 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
   const same = (a: string | null) => !!a && !!address && a.toLowerCase() === address.toLowerCase();
   const role = same(riskManager) ? "risk manager" : same(owner) ? "owner" : null;
   const wrongChain = isConnected && chainId !== sepolia.id;
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const switchToSepolia = async () => {
+    setSwitchError(null);
+    try {
+      await switchChainAsync({ chainId: sepolia.id });
+    } catch (err) {
+      const e = err as { shortMessage?: string; message?: string };
+      setSwitchError(e.shortMessage ?? e.message ?? String(err));
+    }
+  };
 
   const gate = (name: string, account: string | null): RoleGate => {
     if (!account) return { canSign: false, reason: `No ${name} address in the deployment record.` };
@@ -183,7 +203,12 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
 
   const header = (
     <div className="wallet-bar">
-      {isConnected && address ? (
+      {isConnected && address && wrongChain ? (
+        <p>
+          Your wallet is on chain <b>{chainId ?? "unknown"}</b> for this site. Leash runs on Sepolia
+          ({sepolia.id}).{switchError && <> Switch failed: {switchError}</>}
+        </p>
+      ) : isConnected && address ? (
         <p>
           Signing as <b>{role ?? "an account with no role"}</b>{" "}
           <span className="addr" title={address}>
@@ -194,7 +219,7 @@ function WalletRoles({ deployments, label, revoked, onChanged }: Props) {
         <p>Each role signs from its own wallet. Import both accounts, then switch between them.</p>
       )}
       {wrongChain ? (
-        <button className="btn" onClick={() => void switchChainAsync({ chainId: sepolia.id })}>
+        <button className="btn" onClick={() => void switchToSepolia()}>
           Switch to Sepolia
         </button>
       ) : (
