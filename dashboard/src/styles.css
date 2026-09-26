@@ -900,6 +900,18 @@ textarea {
   width: 4.5em;
 }
 
+/* Delegating the risk manager on the new agent's resolver: a full width checkbox row. */
+.issue-fields .field.check {
+  grid-column: 1 / -1;
+  align-items: flex-start;
+}
+
+.issue-fields .field.check input {
+  width: auto;
+  height: auto;
+  margin-top: 2px;
+}
+
 .field input.wide {
   flex: 1;
   width: auto;

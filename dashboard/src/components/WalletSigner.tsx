@@ -6,14 +6,17 @@ import { sepolia as sepoliaNetwork } from "@reown/appkit/networks";
 import { createAppKit, useAppKit } from "@reown/appkit/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { http, type Abi, type Address } from "viem";
+import { http, zeroAddress, type Abi, type Address } from "viem";
 import { sepolia } from "viem/chains";
 import { WagmiProvider, useAccount, usePublicClient, useSwitchChain, useWalletClient } from "wagmi";
 import {
   cutCall,
+  deployedResolver,
   fundCalls,
   FUND_AMOUNT,
+  grantRiskManagerCall,
   issueCalls,
+  liveResolver,
   registryWriteAbi,
   forbiddenCalls,
   forbiddenOutcome,
@@ -103,11 +106,15 @@ function WalletRoles({ deployments, label, children }: Props) {
   const { switchChainAsync } = useSwitchChain();
   const { open } = useAppKit();
 
-  const target: LeashTarget = {
-    label,
-    parentName: deployments.parentName,
-    registry: deployments.orgRegistry,
-    resolver: deployments.orgResolver as Address,
+  /// The selected agent with its own resolver, read from the registry when the action runs.
+  const target = async (): Promise<LeashTarget> => {
+    if (!publicClient) throw new Error("No RPC client.");
+    return {
+      label,
+      parentName: deployments.parentName,
+      registry: deployments.orgRegistry,
+      resolver: await liveResolver(publicClient, deployments.orgRegistry, label),
+    };
   };
   const riskManager = deployments.riskManager ?? null;
   const owner = deployments.orgOwner ?? null;
@@ -153,12 +160,12 @@ function WalletRoles({ deployments, label, children }: Props) {
       chain: sepolia,
     } as never);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    return { hash, ok: receipt.status === "success" };
+    return { hash, ok: receipt.status === "success", receipt };
   };
 
   const actions: RoleActions = {
     tighten: async (cap) => {
-      const r = await send(tightenCall(target, cap));
+      const r = await send(tightenCall(await target(), cap));
       return {
         tone: r.ok ? "ok" : "bad",
         text: r.ok ? `Cap set to ${cap} lUSD.` : "Reverted on chain.",
@@ -170,7 +177,7 @@ function WalletRoles({ deployments, label, children }: Props) {
       if (!publicClient || !riskManager)
         throw new Error("No risk manager in the deployment record.");
       const results = [];
-      for (const a of forbiddenCalls(target, riskManager as Address)) {
+      for (const a of forbiddenCalls(await target(), riskManager as Address)) {
         try {
           await publicClient.simulateContract({
             ...a.call,
@@ -187,7 +194,7 @@ function WalletRoles({ deployments, label, children }: Props) {
       };
     },
     slippage: async (bps) => {
-      const r = await send(slippageCall(target, bps));
+      const r = await send(slippageCall(await target(), bps));
       return {
         tone: r.ok ? "ok" : "bad",
         text: r.ok
@@ -197,7 +204,14 @@ function WalletRoles({ deployments, label, children }: Props) {
       };
     },
     cut: async () => {
-      const r = await send(cutCall(target));
+      const r = await send(
+        cutCall({
+          label,
+          parentName: deployments.parentName,
+          registry: deployments.orgRegistry,
+          resolver: zeroAddress,
+        }),
+      );
       return {
         tone: r.ok ? "ok" : "bad",
         text: r.ok ? `${label}.${deployments.parentName} cut.` : "Reverted on chain.",
@@ -218,12 +232,10 @@ function WalletRoles({ deployments, label, children }: Props) {
           `${form.label}.${deployments.parentName} is already live. Cut it first, or pick another name.`,
         );
       }
+      if (form.delegateRisk && !riskManager)
+        throw new Error("No risk manager in the deployment record.");
       const calls = issueCalls(
-        {
-          parentName: deployments.parentName,
-          registry: deployments.orgRegistry,
-          resolver: target.resolver,
-        },
+        { parentName: deployments.parentName, registry: deployments.orgRegistry },
         {
           label: form.label,
           agent: form.agent as Address,
@@ -236,13 +248,29 @@ function WalletRoles({ deployments, label, children }: Props) {
         },
         block.timestamp,
       );
-      const registered = await send(calls.register);
+      const deployed = await send(calls.deployResolver);
+      if (!deployed.ok)
+        return {
+          tone: "bad",
+          text: "Resolver deployment reverted on chain.",
+          txHash: deployed.hash,
+        };
+      const resolver = deployedResolver(deployed.receipt.logs);
+      const registered = await send(calls.register(resolver));
       if (!registered.ok)
         return { tone: "bad", text: "register reverted on chain.", txHash: registered.hash };
-      const written = await send(calls.policy);
-      if (!written.ok)
-        return { tone: "bad", text: "Policy write reverted on chain.", txHash: written.hash };
-      return issuedOutcome(form, deployments.parentName, calls.expiry, written.hash);
+      let last = registered.hash;
+      if (form.delegateRisk && riskManager) {
+        const granted = await send(grantRiskManagerCall(resolver, riskManager as Address));
+        if (!granted.ok)
+          return {
+            tone: "bad",
+            text: "Risk manager grant reverted on chain.",
+            txHash: granted.hash,
+          };
+        last = granted.hash;
+      }
+      return issuedOutcome(form, deployments.parentName, calls.expiry, resolver, last);
     },
     fund: async () => {
       if (!deployments.vault) throw new Error("No vault in the deployment record.");

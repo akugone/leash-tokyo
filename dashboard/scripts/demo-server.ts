@@ -6,14 +6,15 @@
  *   DELETE /api/agent-events          clear the feed between rehearsals
  *   GET  /api/demo/status             {enabled, riskManager, owner, rpc}
  *   Every action below takes an optional `label` (the dashboard's selected tab), default the record's agentLabel.
- *   POST /api/demo/tighten {cap}      risk-manager: setText(leash.dailyNotional) on the org resolver
+ *   POST /api/demo/tighten {cap}      risk-manager: setText(leash.dailyNotional) on the agent's own resolver
  *   POST /api/demo/forbid             risk-manager tries unregister / setAddress / setText(leash.quote) /
  *                                     setText(leash.maxSlippageBps): must revert
  *   POST /api/demo/cut                owner: unregister(labelId) on the org registry
- *   POST /api/demo/slippage {bps}     owner: setText(leash.maxSlippageBps) on the org resolver, 1 to 9999
+ *   POST /api/demo/slippage {bps}     owner: setText(leash.maxSlippageBps) on the agent's own resolver, 1 to 9999
  *   POST /api/demo/fund               owner: mint test lUSD and lETH to the org vault
- *   POST /api/demo/issue {label, agent, cap, bps, ttlSeconds}
- *                                     owner: register a new (or expired) agent subname and write its policy
+ *   POST /api/demo/issue {label, agent, cap, bps, ttlSeconds, delegateRisk}
+ *                                     owner: deploy the agent's own resolver with its policy, register the new (or
+ *                                     expired) subname pointing to it, then grant the risk manager on it if asked
  *
  * Keys come from the repo root `.env` (RISK_MANAGER_PK, OWNER_PK) and never leave the dev server. The
  * static build has none of this: the dashboard then shows the feed and controls as unavailable.
@@ -23,6 +24,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import {
   isAddress,
+  zeroAddress,
   createPublicClient,
   createWalletClient,
   defineChain,
@@ -36,13 +38,18 @@ import { sepolia } from "viem/chains";
 import type { Plugin } from "vite";
 import {
   cutCall,
+  deployedResolver,
+  EAC_UNAUTHORIZED,
   forbiddenCalls,
   forbiddenOutcome,
   agentLabelError,
   FUND_AMOUNT,
   fundCalls,
+  grantRiskManagerCall,
   issueCalls,
+  liveResolver,
   registryWriteAbi,
+  revertSelector,
   slippageCall,
   tightenCall,
   type LeashTarget,
@@ -104,21 +111,21 @@ function context(label?: string) {
     return { account, client: createWalletClient({ account, chain, transport: http(rpc) }) };
   };
   const agentLabel = label ?? d.agentLabel;
-  const target: LeashTarget = {
-    label: agentLabel,
-    parentName: d.parentName,
-    registry: d.orgRegistry as Address,
-    resolver: d.orgResolver as Address,
-  };
+  const registry = d.orgRegistry as Address;
   return {
     d,
     rpc,
     publicClient,
-    target,
+    /// The name with its own resolver, read from the registry now.
+    target: async (): Promise<LeashTarget> => ({
+      label: agentLabel,
+      parentName: d.parentName,
+      registry,
+      resolver: await liveResolver(publicClient, registry, agentLabel),
+    }),
     agentLabel,
     fullName: `${agentLabel}.${d.parentName}`,
-    resolver: d.orgResolver as Address,
-    registry: d.orgRegistry as Address,
+    registry,
     riskManager: () => wallet(env.RISK_MANAGER_PK, "RISK_MANAGER_PK"),
     owner: () => wallet(env.OWNER_PK, "OWNER_PK"),
     riskManagerAddress: env.RISK_MANAGER_PK
@@ -140,7 +147,7 @@ async function tighten(capHuman: string, label?: string) {
     text: `risk-manager sets leash.dailyNotional to ${capHuman} lUSD (${raw})`,
   });
   const txHash = await client.writeContract({
-    ...tightenCall(ctx.target, capHuman),
+    ...tightenCall(await ctx.target(), capHuman),
     account,
     chain: client.chain,
   });
@@ -158,7 +165,7 @@ async function forbid(label?: string) {
   const ctx = context(label);
   const { account } = ctx.riskManager();
   const results: { ok: boolean; text: string }[] = [];
-  for (const a of forbiddenCalls(ctx.target, account.address)) {
+  for (const a of forbiddenCalls(await ctx.target(), account.address)) {
     try {
       await ctx.publicClient.simulateContract({ ...a.call, account } as never);
       results.push(forbiddenOutcome(a.what, null));
@@ -180,7 +187,7 @@ async function setSlippage(bps: string, label?: string) {
     text: `owner sets leash.maxSlippageBps to ${bps} bps (${Number(bps) / 100}%)`,
   });
   const txHash = await client.writeContract({
-    ...slippageCall(ctx.target, bps),
+    ...slippageCall(await ctx.target(), bps),
     account,
     chain: client.chain,
   });
@@ -204,7 +211,12 @@ async function cut(label?: string) {
     text: `owner cuts ${ctx.fullName}: unregister(labelId)`,
   });
   const txHash = await client.writeContract({
-    ...cutCall(ctx.target),
+    ...cutCall({
+      label: ctx.agentLabel,
+      parentName: ctx.d.parentName,
+      registry: ctx.registry,
+      resolver: zeroAddress,
+    }),
     account,
     chain: client.chain,
   });
@@ -255,13 +267,15 @@ async function fund() {
   return { txHash, status, text };
 }
 
-/// Owner: the two transactions of script/ens/IssueAgent.s.sol, with the pool's quote and tokens.
+/// Owner: the transactions of script/ens/IssueAgent.s.sol and GrantRiskManager.s.sol, with the pool's quote and
+/// tokens: the agent's own resolver holding its policy, the subname pointing to it, the risk manager if asked.
 async function issue(input: {
   label: string;
   agent: Address;
   cap: string;
   bps: string;
   ttlSeconds: bigint;
+  delegateRisk: boolean;
 }) {
   const ctx = context();
   const { account, client } = ctx.owner();
@@ -275,8 +289,10 @@ async function issue(input: {
   });
   if (current > block.timestamp)
     throw new Error(`${fullName} is already live. Cut it first, or pick another name.`);
+  const riskManager = ctx.riskManagerAddress;
+  if (input.delegateRisk && !riskManager) throw new Error("RISK_MANAGER_PK missing in .env");
   const calls = issueCalls(
-    { parentName: ctx.d.parentName, registry: ctx.registry, resolver: ctx.resolver },
+    { parentName: ctx.d.parentName, registry: ctx.registry },
     {
       label: input.label,
       agent: input.agent,
@@ -292,32 +308,42 @@ async function issue(input: {
   push({
     source: "owner",
     kind: "intent",
-    text: `owner issues ${fullName}: agent ${input.agent}, cap ${input.cap} lUSD, max slippage ${input.bps} bps`,
+    text: `owner issues ${fullName} with its own resolver: agent ${input.agent}, cap ${input.cap} lUSD, max slippage ${input.bps} bps${input.delegateRisk ? ", risk manager delegated" : ", no risk manager"}`,
   });
-  const registerHash = await client.writeContract({
-    ...calls.register,
-    account,
-    chain: client.chain,
-  });
-  const registered = await ctx.publicClient.waitForTransactionReceipt({ hash: registerHash });
-  if (registered.status !== "success") {
-    push({
-      source: "owner",
-      kind: "revert",
-      text: `REVERTED register ${fullName}`,
-      txHash: registerHash,
-    });
-    return { txHash: registerHash, status: registered.status, expiry: calls.expiry.toString() };
-  }
-  const txHash = await client.writeContract({ ...calls.policy, account, chain: client.chain });
-  const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash: txHash });
+  const send = async (call: Parameters<typeof client.writeContract>[0]) => {
+    const hash = await client.writeContract({ ...call, account, chain: client.chain } as never);
+    return { hash, receipt: await ctx.publicClient.waitForTransactionReceipt({ hash }) };
+  };
+  const failed = (step: string, hash: Hex) => {
+    const text = `REVERTED ${step} for ${fullName}`;
+    push({ source: "owner", kind: "revert", text, txHash: hash });
+    return { txHash: hash, status: "reverted", text, expiry: calls.expiry.toString() };
+  };
+
+  const deployed = await send(calls.deployResolver as never);
+  if (deployed.receipt.status !== "success") return failed("resolver deployment", deployed.hash);
+  const resolver = deployedResolver(deployed.receipt.logs);
   push({
     source: "owner",
-    kind: receipt.status === "success" ? "ok" : "revert",
-    text: `${receipt.status === "success" ? "OK" : "REVERTED"} block ${receipt.blockNumber}, ${fullName} is live until ${new Date(Number(calls.expiry) * 1000).toISOString()}`,
+    kind: "ok",
+    text: `${fullName} has its own resolver ${resolver}, policy written in initialize`,
+    txHash: deployed.hash,
+  });
+  const registered = await send(calls.register(resolver) as never);
+  if (registered.receipt.status !== "success") return failed("register", registered.hash);
+  let txHash = registered.hash;
+  if (input.delegateRisk && riskManager) {
+    const granted = await send(grantRiskManagerCall(resolver, riskManager) as never);
+    if (granted.receipt.status !== "success") return failed("risk manager grant", granted.hash);
+    txHash = granted.hash;
+  }
+  push({
+    source: "owner",
+    kind: "ok",
+    text: `OK ${fullName} is live until ${new Date(Number(calls.expiry) * 1000).toISOString()}`,
     txHash,
   });
-  return { txHash, registerHash, status: receipt.status, expiry: calls.expiry.toString() };
+  return { txHash, resolver, status: "success", expiry: calls.expiry.toString() };
 }
 
 // ============ HTTP plumbing ============
@@ -411,12 +437,24 @@ export function leashDemoPlugin(): Plugin {
             return json(
               res,
               200,
-              await issue({ label, agent: agent as Address, cap, bps, ttlSeconds: BigInt(ttl) }),
+              await issue({
+                label,
+                agent: agent as Address,
+                cap,
+                bps,
+                ttlSeconds: BigInt(ttl),
+                delegateRisk: body.delegateRisk !== false,
+              }),
             );
           }
           return json(res, 404, { error: "unknown demo endpoint" });
         } catch (err) {
-          const message = err instanceof Error ? err.message.split("\n")[0] : String(err);
+          const message =
+            revertSelector(err) === EAC_UNAUTHORIZED
+              ? "Refused by ENS: EACUnauthorizedAccountRoles, this account holds no role for that record on the agent's resolver."
+              : err instanceof Error
+                ? err.message.split("\n")[0]
+                : String(err);
           push({ source: "system", kind: "error", text: message });
           return json(res, 500, { error: message });
         }

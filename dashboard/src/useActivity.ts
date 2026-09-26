@@ -21,10 +21,13 @@ export function useActivity(client: PublicClient | null, deployments: Deployment
   const senders = useRef(new Map<Hex, Address>());
   const scannedTo = useRef<bigint | null>(null);
   const seen = useRef(new Set<string>());
+  // Each agent's own resolver, found as the scan goes.
+  const resolvers = useRef(new Set<Address>());
 
   useEffect(() => {
     logs.current = [];
     seen.current = new Set();
+    resolvers.current = new Set();
     senders.current = new Map();
     scannedTo.current = null;
     setItems([]);
@@ -46,7 +49,14 @@ export function useActivity(client: PublicClient | null, deployments: Deployment
               : lookbackStart(head, LOG_LOOKBACK);
         for (const range of from <= head ? blockRanges(from, head, AGENT_LOG_CHUNK) : []) {
           // The scan overlaps its last blocks (rescanFrom): keep each log once.
-          for (const log of await fetchActivityLogs(client, deployments, range.from, range.to)) {
+          const found = await fetchActivityLogs(
+            client,
+            deployments,
+            range.from,
+            range.to,
+            resolvers.current,
+          );
+          for (const log of found) {
             const key = `${log.transactionHash}:${log.logIndex}`;
             if (seen.current.has(key)) continue;
             seen.current.add(key);

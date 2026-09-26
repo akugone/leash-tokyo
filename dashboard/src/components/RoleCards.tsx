@@ -12,11 +12,20 @@ type Props = {
   /// record is empty (no slippage bound).
   currentCap: string | null;
   currentBps: string | null;
+  /// Whether the risk manager holds its role on this agent's own resolver. Null until read.
+  riskDelegated: boolean | null;
 };
 
 /// The two human roles of the story on the selected agent: the risk manager tightens, the owner narrows the
 /// slippage, cuts the leash, or issues the name again once cut.
-export function RoleCards({ revoked, onChanged, onReissue, currentCap, currentBps }: Props) {
+export function RoleCards({
+  revoked,
+  onChanged,
+  onReissue,
+  currentCap,
+  currentBps,
+  riskDelegated,
+}: Props) {
   const signer = useSigner();
   const [cap, setCap] = useState("10");
   const [slippage, setSlippage] = useState("50");
@@ -65,9 +74,16 @@ export function RoleCards({ revoked, onChanged, onReissue, currentCap, currentBp
           )}
         </div>
         <p className="role-hint">
-          Can edit two records of the agent's name, <code>leash.dailyNotional</code> and{" "}
-          <code>leash.tokens</code>. Nothing else, not even <code>leash.maxSlippageBps</code>.
+          Can edit two records of this agent, <code>leash.dailyNotional</code> and{" "}
+          <code>leash.tokens</code>, granted on the agent's own resolver: no power over any other
+          agent. Nothing else, not even <code>leash.maxSlippageBps</code>.
         </p>
+        {riskDelegated === false && (
+          <p className="role-gate">
+            No role on this agent's resolver: the owner issued it without a risk manager. Tightening
+            reverts with <code>EACUnauthorizedAccountRoles</code>.
+          </p>
+        )}
         <div className="role-row">
           <label className="field">
             <span>daily cap</span>

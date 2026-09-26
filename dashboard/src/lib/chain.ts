@@ -20,10 +20,13 @@ import {
   decodeText,
   dnsEncode,
   labelId,
+  labelKey,
   lookbackStart,
   parseSlippageRecord,
   parseTokenList,
+  ROLE_SET_TEXT,
   textCalldata,
+  textResource,
   type Deployments,
 } from "./leash";
 
@@ -87,7 +90,13 @@ export type Snapshot = {
   labelIdValue: bigint;
   owner: Field<Address>;
   expiry: Field<bigint>;
+  /// What the registry answers now: the agent's own resolver, zero once the name is cut or expired.
   resolver: Field<Address>;
+  /// The agent's own resolver, still known after the name was cut (from the registry's `ResolverUpdated` events).
+  lastResolver: Address | null;
+  /// Whether the deployment's risk manager holds `ROLE_SET_TEXT` on `leash.dailyNotional` in this agent's own
+  /// resolver. Null when the record names no risk manager or the resolver is unknown.
+  riskDelegated: Field<boolean> | null;
   policy: Field<Policy>;
   /// True when `policy()` reverted with LeashRevoked.
   revokedByHook: boolean;
@@ -310,30 +319,56 @@ export const labelRegisteredEvent = parseAbiItem(
   "event LabelRegistered(uint256 indexed tokenId, bytes32 indexed labelHash, string label, address owner, uint64 expiry, address indexed sender)",
 );
 
+/// Emitted by the org registry when a name is registered with a resolver, and on every `setResolver`: each agent
+/// points to its own resolver.
+export const resolverUpdatedEvent = parseAbiItem(
+  "event ResolverUpdated(uint256 indexed tokenId, address indexed resolver, address indexed sender)",
+);
+
 /// Public RPCs accept wide log ranges when the query is filtered on one address: 50k blocks is about a week.
 export const AGENT_LOG_CHUNK = 50_000n;
 
-/// Labels registered in `[from, to]`, first registration order, no duplicates (a re-issued name appears once).
+/// What the registry's logs in a range say about the org's agents: labels in first registration order, no
+/// duplicates (a re-issued name appears once), and each name's resolver in the order it was set, keyed by
+/// `labelKey` (the token id changes when a name is re-issued, its key does not).
+export type AgentLogs = {
+  labels: string[];
+  resolvers: { key: bigint; resolver: Address }[];
+};
+
 export async function fetchAgentLabels(
   client: PublicClient,
   registry: Address,
   from: bigint,
   to: bigint,
-): Promise<string[]> {
-  const labels: string[] = [];
+): Promise<AgentLogs> {
+  const out: AgentLogs = { labels: [], resolvers: [] };
   for (const range of blockRanges(from, to, AGENT_LOG_CHUNK)) {
     const logs = await client.getLogs({
       address: registry,
-      event: labelRegisteredEvent,
+      events: [labelRegisteredEvent, resolverUpdatedEvent],
       fromBlock: range.from,
       toBlock: range.to,
     });
     for (const log of logs) {
-      const label = log.args.label;
-      if (label && !labels.includes(label)) labels.push(label);
+      if (log.eventName === "LabelRegistered") {
+        const label = log.args.label;
+        if (label && !out.labels.includes(label)) out.labels.push(label);
+      } else if (log.args.tokenId !== undefined && log.args.resolver) {
+        out.resolvers.push({ key: labelKey(log.args.tokenId), resolver: log.args.resolver });
+      }
     }
   }
-  return labels;
+  return out;
+}
+
+/// The last resolver the registry pointed `label` to, zero address excluded. Null when it never had one.
+export function lastResolverOf(resolvers: AgentLogs["resolvers"], label: string): Address | null {
+  const key = labelKey(labelId(label));
+  const set = resolvers.filter(
+    (r) => r.key === key && r.resolver !== "0x0000000000000000000000000000000000000000",
+  );
+  return set.length ? set[set.length - 1].resolver : null;
 }
 
 /// Current expiry of each label, read in one multicall. Zero once cut.
@@ -402,6 +437,37 @@ export async function fetchSnapshot(
     deployments.vault ? field(fetchVault(client, deployments.vault, deployments)) : null,
   ]);
 
+  // The agent's own resolver. A cut name reads zero from the registry: find the one it had in the registry's logs.
+  const liveResolver =
+    resolver.value && resolver.value !== "0x0000000000000000000000000000000000000000"
+      ? resolver.value
+      : null;
+  let lastResolver = liveResolver ?? previous?.lastResolver ?? null;
+  // A name never issued has expiry zero: nothing to look for.
+  if (!lastResolver && resolver.value !== null && expiry.value && block.value) {
+    const from = deployments.orgRegistryBlock
+      ? BigInt(deployments.orgRegistryBlock)
+      : lookbackStart(block.value.number, LOG_LOOKBACK);
+    const history = await field(
+      fetchAgentLabels(client, deployments.orgRegistry, from, block.value.number),
+    );
+    lastResolver = history.value ? lastResolverOf(history.value.resolvers, label) : null;
+  }
+  const riskDelegated =
+    lastResolver && deployments.riskManager
+      ? sticky(
+          previous?.riskDelegated,
+          await field(
+            client.readContract({
+              address: lastResolver,
+              abi: resolverAbi,
+              functionName: "hasRoles",
+              args: [textResource("leash.dailyNotional"), ROLE_SET_TEXT, deployments.riskManager],
+            }),
+          ),
+        )
+      : null;
+
   let policy: Field<Policy>;
   let revokedByHook = false;
   if (policyRaw.ok) {
@@ -421,14 +487,10 @@ export async function fetchSnapshot(
   } else {
     revokedByHook = isLeashRevoked(policyRaw.err);
     const hookError = errorMessage(policyRaw.err);
-    // Fall back to the org resolver so the last known leash length stays on screen.
-    const fallbackResolver =
-      resolver.value && resolver.value !== "0x0000000000000000000000000000000000000000"
-        ? resolver.value
-        : deployments.orgResolver;
-    if (fallbackResolver) {
+    // Fall back to the agent's own resolver so the last known leash length stays on screen.
+    if (lastResolver) {
       const fromResolver = await field(
-        readPolicyFromResolver(client, fallbackResolver, dnsName, expiry.value ?? 0n),
+        readPolicyFromResolver(client, lastResolver, dnsName, expiry.value ?? 0n),
       );
       policy = fromResolver.value
         ? { value: fromResolver.value, error: null }
@@ -475,6 +537,8 @@ export async function fetchSnapshot(
       expiry.value !== null ? { value: BigInt(expiry.value), error: null } : expiry,
     ),
     resolver: sticky(previous?.resolver, resolver),
+    lastResolver,
+    riskDelegated,
     policy,
     revokedByHook,
     spentToday: sticky(previous?.spentToday, spentToday),

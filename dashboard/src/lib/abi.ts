@@ -25,6 +25,7 @@ export const registryAbi = parseAbi([
 
 export const resolverAbi = parseAbi([
   "function resolve(bytes name, bytes data) view returns (bytes)",
+  "function hasRoles(uint256 resource, uint256 roleBitmap, address account) view returns (bool)",
 ]);
 
 /// Inner calls wrapped in `resolve(name, data)`. The node argument is ignored by the resolver.
