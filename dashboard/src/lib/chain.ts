@@ -4,6 +4,7 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   createPublicClient,
+  erc20Abi,
   http,
   type Address,
   type Hex,
@@ -53,6 +54,9 @@ export type SwapRow = {
   agent: Address;
 };
 
+/// One pool token held by the vault.
+export type VaultHolding = { token: Address; symbol: string; balance: bigint };
+
 export type Field<T> = { value: T; error: null } | { value: null; error: string };
 
 export type Snapshot = {
@@ -71,6 +75,8 @@ export type Snapshot = {
   /// From `remainingToday(label)`; the hook returns 0 when the name is revoked or has no resolver.
   remainingToday: Field<bigint>;
   nonce: Field<bigint>;
+  /// Null when the deployment has no vault.
+  vault: Field<VaultHolding[]> | null;
   swaps: SwapRow[];
   swapsError: string | null;
   scannedTo: bigint | null;
@@ -211,6 +217,29 @@ export function mergeSwaps(previous: SwapRow[], fresh: SwapRow[]): SwapRow[] {
     .slice(0, MAX_SWAPS);
 }
 
+/// Balances of the pool tokens in the vault. Symbols are read each poll, cheap next to the log scan.
+async function fetchVault(
+  client: PublicClient,
+  vault: Address,
+  deployments: Deployments,
+): Promise<VaultHolding[]> {
+  const tokens = [deployments.token0, deployments.token1].filter((t): t is Address => !!t);
+  return Promise.all(
+    tokens.map(async (token) => {
+      const [symbol, balance] = await Promise.all([
+        client.readContract({ address: token, abi: erc20Abi, functionName: "symbol" }),
+        client.readContract({
+          address: token,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [vault],
+        }),
+      ]);
+      return { token, symbol, balance };
+    }),
+  );
+}
+
 export async function fetchSnapshot(
   client: PublicClient,
   deployments: Deployments,
@@ -224,21 +253,32 @@ export async function fetchSnapshot(
   const hook = { address: deployments.hook, abi: hookAbi } as const;
 
   const blockP = field(client.getBlock({ blockTag: "latest" }));
-  const [block, owner, expiry, resolver, policyRaw, spentToday, remainingToday, nonce, slippage] =
-    await Promise.all([
-      blockP,
-      field(client.readContract({ ...registry, functionName: "getOwner", args: [id] })),
-      field(client.readContract({ ...registry, functionName: "getExpiry", args: [id] })),
-      field(client.readContract({ ...registry, functionName: "getResolver", args: [label] })),
-      client
-        .readContract({ ...hook, functionName: "policy", args: [label] })
-        .then((r) => ({ ok: true as const, value: r }))
-        .catch((err: unknown) => ({ ok: false as const, err })),
-      field(client.readContract({ ...hook, functionName: "spentToday", args: [node] })),
-      field(client.readContract({ ...hook, functionName: "remainingToday", args: [label] })),
-      field(client.readContract({ ...hook, functionName: "nonces", args: [node] })),
-      field(client.readContract({ ...hook, functionName: "maxSlippageBps", args: [label] })),
-    ]);
+  const [
+    block,
+    owner,
+    expiry,
+    resolver,
+    policyRaw,
+    spentToday,
+    remainingToday,
+    nonce,
+    slippage,
+    vault,
+  ] = await Promise.all([
+    blockP,
+    field(client.readContract({ ...registry, functionName: "getOwner", args: [id] })),
+    field(client.readContract({ ...registry, functionName: "getExpiry", args: [id] })),
+    field(client.readContract({ ...registry, functionName: "getResolver", args: [label] })),
+    client
+      .readContract({ ...hook, functionName: "policy", args: [label] })
+      .then((r) => ({ ok: true as const, value: r }))
+      .catch((err: unknown) => ({ ok: false as const, err })),
+    field(client.readContract({ ...hook, functionName: "spentToday", args: [node] })),
+    field(client.readContract({ ...hook, functionName: "remainingToday", args: [label] })),
+    field(client.readContract({ ...hook, functionName: "nonces", args: [node] })),
+    field(client.readContract({ ...hook, functionName: "maxSlippageBps", args: [label] })),
+    deployments.vault ? field(fetchVault(client, deployments.vault, deployments)) : null,
+  ]);
 
   let policy: Field<Policy>;
   let revokedByHook = false;
@@ -309,6 +349,7 @@ export async function fetchSnapshot(
     spentToday,
     remainingToday,
     nonce,
+    vault,
     swaps,
     swapsError,
     scannedTo,

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Snapshot } from "../lib/chain";
-import { shortHex, type Deployments } from "../lib/leash";
+import { formatAmount, shortHex, type Deployments } from "../lib/leash";
 
 type Props = {
   snapshot: Snapshot | null;
@@ -89,6 +89,18 @@ export function Cards({ snapshot, deployments }: Props) {
           <Fact label="hook">
             <Addr value={deployments?.hook ?? null} />
           </Fact>
+          {deployments?.vault && (
+            <Fact label="org vault" error={snapshot?.vault?.error}>
+              <Addr value={deployments.vault} />
+              {snapshot?.vault?.value && (
+                <small>
+                  {snapshot.vault.value
+                    .map((h) => `${formatAmount(h.balance)} ${h.symbol}`)
+                    .join(" · ")}
+                </small>
+              )}
+            </Fact>
+          )}
           <Fact label="org registry">
             <Addr value={deployments?.orgRegistry ?? null} />
             <small title={deployments?.parentNode}>parent {deployments?.parentName ?? "?"}</small>
