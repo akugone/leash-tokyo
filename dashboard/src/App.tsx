@@ -14,7 +14,8 @@ import { StatusPill } from "./components/StatusPill";
 import { SwapTable } from "./components/SwapTable";
 import { nextAgentLabel } from "./lib/actions";
 import { chainNow, type ChainClock } from "./lib/chain";
-import { computeStatus, type LeashStatus } from "./lib/leash";
+import { childNode, computeStatus, type LeashStatus } from "./lib/leash";
+import { useActivity } from "./useActivity";
 import { useAgents } from "./useAgents";
 import { useDashboard } from "./useDashboard";
 
@@ -33,6 +34,7 @@ export function App() {
   const { config, deployments, snapshot } = dash;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { agents, refresh: refreshAgents } = useAgents(dash.client, deployments);
+  const activity = useActivity(dash.client, deployments);
   // The "+ New agent" tab, with the form it opens prefilled.
   const [draft, setDraft] = useState<IssueForm | null>(null);
 
@@ -74,7 +76,14 @@ export function App() {
   const changed = () => {
     dash.refreshNow();
     refreshAgents();
+    activity.refresh();
   };
+  const node = deployments ? childNode(deployments.parentNode, config.label) : null;
+  // Etherscan links for the live Sepolia record, none for a local fork.
+  const txUrl =
+    deployments?.chainId === "11155111" && !/localhost|127\.0\.0\.1/.test(config.rpc)
+      ? "https://sepolia.etherscan.io/tx/"
+      : undefined;
   const lastUpdate = snapshot ? new Date(snapshot.fetchedAt).toLocaleTimeString() : "never";
 
   return (
@@ -167,7 +176,10 @@ export function App() {
               />
 
               <div className="ops">
-                <AgentFeed onActivity={changed} />
+                <AgentFeed
+                  onActivity={changed}
+                  chain={{ items: activity.items, latest: activity.latest, now, node, txUrl }}
+                />
                 <RoleCards revoked={status === "revoked"} onChanged={changed} onReissue={reissue} />
               </div>
 

@@ -11,6 +11,7 @@
 #   script/demo.sh cut       # act 5: owner cuts the leash
 #   script/demo.sh short     # bonus: issue trader-2 with a 3 minute expiry
 #   script/demo.sh agent     # open Claude Code as the trading agent (MCP tools leash_policy, leash_swap)
+#                            #   LEASH_RECORD_REFUSALS=1: send refused swaps anyway, recorded on chain (agent pays gas)
 #   script/demo.sh dashboard # dashboard dev server for this network, with the demo controls and the feed
 #   script/demo.sh status    # print the deployment record
 #
@@ -20,6 +21,9 @@
 #                                                 #   Sepolia ETH by OWNER_PK. PARENT_DURATION (default 365 days)
 #                                                 #   and AGENT_TTL (default 30 days) in seconds
 #   LEASH_NETWORK=sepolia script/demo.sh verify   # verify hook, vault and tokens on Etherscan (ETHERSCAN_API_KEY)
+#
+# Either network:
+#   script/demo.sh migrate-vault   # deploy a fresh LeashVault and move the pool tokens over (owner signs)
 #
 # Requires: foundry, a .env with SEPOLIA_RPC_URL, OWNER_PK, RISK_MANAGER_PK, AGENT_PK (see .env.example).
 set -euo pipefail
@@ -180,6 +184,10 @@ verify)
         verify "$token" src/mocks/LeashTestToken.sol:LeashTestToken \
             "$(cast abi-encode 'f(string,string)' "$(cast call "$token" 'name()(string)' --rpc-url "$RPC" | tr -d '"')" "$(cast call "$token" 'symbol()(string)' --rpc-url "$RPC" | tr -d '"')")"
     done
+    ;;
+migrate-vault)
+    if [ "$NETWORK" = sepolia ]; then live_script script/MigrateVault.s.sol; else script script/MigrateVault.s.sol; fi
+    jq '{vault, vaultPrevious}' "$LEASH_DEPLOYMENTS_FILE"
     ;;
 dashboard)
     # Local dev server: the browser and the demo controls both use this network's RPC and record.

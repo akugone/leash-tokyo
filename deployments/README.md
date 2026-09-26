@@ -22,3 +22,4 @@ Every value is a JSON string. Keys:
 | `fee`, `tickSpacing` | pool key parameters |
 | `poolId` | `PoolId` of the demo pool |
 | `vault` | the org `LeashVault`, which holds the demo tokens the agent trades |
+| `vaultPrevious` | the vault `script/MigrateVault.s.sol` replaced; its past events stay on chain |

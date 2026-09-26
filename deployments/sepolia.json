@@ -18,5 +18,6 @@
   "fee": "3000",
   "tickSpacing": "60",
   "poolId": "0x74e548ef341b71b902f9f0b6ff76c3897c1b40201540b9b2ab418338ae75db32",
-  "vault": "0x3Ee1b2a02CA8a87572B6d172913Db37bd3C37022"
+  "vault": "0xF585aB28733dEB745105f4d8F960c4CcE4bC025B",
+  "vaultPrevious": "0x3Ee1b2a02CA8a87572B6d172913Db37bd3C37022"
 }
