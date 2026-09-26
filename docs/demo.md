@@ -63,6 +63,16 @@ Feed: `signed SwapIntent: 300 lUSD …` then `REVERT DailyCapExceeded: trader-1.
 
 Say: we do not trust the agent's prompt, we trust the hook.
 
+## Act 3b: the owner narrows the slippage (30 s, optional)
+
+Dashboard, owner card: type `5` in max slippage (basis points), click **set slippage**. One transaction, `setText(leash.maxSlippageBps, "5")` on the org resolver. Only the owner can: the risk manager holds no role on this key, and its **try to revoke** also fails to clear it.
+
+Feed: `owner sets leash.maxSlippageBps to 5 bps (0.05%)`, `OK block …, max slippage is now 5 bps`. Mandate card: max slippage 0.05%.
+
+Agent terminal: `buy 100 lUSD of lETH`. The agent now reads 5 bps and requests 4 (90% of the bound): the swap stops at that price limit and is partially filled, about 40 of the 100 lUSD. Then `buy 20 lUSD of lETH with 0.5% slippage`: the hook answers `SlippageTooLoose`, nothing moves.
+
+Say: the price impact bound lives in the name too. One record, no redeploy, the agent adapts on its next read.
+
 ## Act 4: the risk desk tightens the leash (40 s)
 
 Dashboard, risk-manager card: type `10` in daily cap, click **tighten the leash**. The risk-manager key holds exactly one power: `ROLE_SET_TEXT` on the `leash.dailyNotional` and `leash.tokens` keys of the org resolver.

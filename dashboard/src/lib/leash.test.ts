@@ -17,6 +17,7 @@ import {
   parseDeployments,
   parseSlippageRecord,
   parseTokenList,
+  slippageInputError,
   remaining,
   spentFraction,
   textCalldata,
@@ -179,5 +180,21 @@ describe("parseSlippageRecord", () => {
     expect(parseSlippageRecord(" 100").error).toContain("malformed");
     expect(parseSlippageRecord("10000").error).toContain("out of range");
     expect(parseSlippageRecord("10000").bps).toBeNull();
+  });
+});
+
+describe("slippageInputError", () => {
+  test("1 to 9999 basis points", () => {
+    expect(slippageInputError("50")).toBeNull();
+    expect(slippageInputError("1")).toBeNull();
+    expect(slippageInputError("9999")).toBeNull();
+    expect(slippageInputError(" 25 ")).toBeNull();
+  });
+  test("refuses what would switch the bound off, freeze swaps or revert", () => {
+    expect(slippageInputError("")).not.toBeNull();
+    expect(slippageInputError("0")).toContain("block every swap");
+    expect(slippageInputError("10000")).not.toBeNull();
+    expect(slippageInputError("0.5")).not.toBeNull();
+    expect(slippageInputError("1%")).not.toBeNull();
   });
 });

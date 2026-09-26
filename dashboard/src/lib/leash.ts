@@ -95,6 +95,16 @@ export function parseSlippageRecord(value: string): SlippageRecord {
   return { bps, error: null };
 }
 
+/// Validation of a slippage value typed in the dashboard, before the owner writes it. Stricter than the record:
+/// empty would switch the bound off and 0 would freeze every swap, so the UI only offers 1 to 9999.
+export function slippageInputError(value: string): string | null {
+  if (value.trim() === "") return "enter a value in basis points";
+  const { bps, error } = parseSlippageRecord(value.trim());
+  if (error) return "whole number of basis points, 1 to 9999";
+  if (bps === 0n) return "0 would block every swap, use 1 to 9999";
+  return null;
+}
+
 // ============ Config ============
 
 export type DashboardConfig = {

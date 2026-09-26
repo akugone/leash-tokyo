@@ -9,6 +9,7 @@
  *   POST /api/demo/forbid             risk-manager tries unregister / setAddress / setText(leash.quote) /
  *                                     setText(leash.maxSlippageBps): must revert
  *   POST /api/demo/cut                owner: unregister(labelId) on the org registry
+ *   POST /api/demo/slippage {bps}     owner: setText(leash.maxSlippageBps) on the org resolver, 1 to 9999
  *
  * Keys come from the repo root `.env` (RISK_MANAGER_PK, OWNER_PK) and never leave the dev server. The
  * static build has none of this: the dashboard then shows the feed and controls as unavailable.
@@ -30,7 +31,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import type { Plugin } from "vite";
-import { dnsEncode, labelId } from "../src/lib/leash";
+import { dnsEncode, labelId, slippageInputError } from "../src/lib/leash";
 
 const repoDir = resolve(__dirname, "..", "..");
 const MAX_EVENTS = 200;
@@ -217,6 +218,33 @@ async function forbid() {
   return { results };
 }
 
+/// Owner only: the risk manager holds no role on this key (clearing it would switch the bound off).
+async function setSlippage(bps: string) {
+  const ctx = context();
+  const { account, client } = ctx.owner();
+  push({
+    source: "owner",
+    kind: "intent",
+    text: `owner sets leash.maxSlippageBps to ${bps} bps (${Number(bps) / 100}%)`,
+  });
+  const txHash = await client.writeContract({
+    address: ctx.resolver,
+    abi: resolverWriteAbi,
+    functionName: "setText",
+    args: [ctx.name, "leash.maxSlippageBps", bps],
+    account,
+    chain: client.chain,
+  });
+  const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash: txHash });
+  push({
+    source: "owner",
+    kind: receipt.status === "success" ? "ok" : "revert",
+    text: `${receipt.status === "success" ? "OK" : "REVERTED"} block ${receipt.blockNumber}, max slippage is now ${bps} bps`,
+    txHash,
+  });
+  return { txHash, block: receipt.blockNumber.toString(), status: receipt.status };
+}
+
 async function cut() {
   const ctx = context();
   const { account, client } = ctx.owner();
@@ -317,6 +345,13 @@ export function leashDemoPlugin(): Plugin {
             if (!/^\d+(\.\d+)?$/.test(cap))
               return json(res, 400, { error: "cap must be a decimal number in lUSD" });
             return json(res, 200, await tighten(cap));
+          }
+          if (url.pathname === "/api/demo/slippage") {
+            const body = await readBody(req);
+            const bps = String(body.bps ?? "").trim();
+            const invalid = slippageInputError(bps);
+            if (invalid) return json(res, 400, { error: invalid });
+            return json(res, 200, await setSlippage(String(BigInt(bps))));
           }
           if (url.pathname === "/api/demo/forbid") return json(res, 200, await forbid());
           if (url.pathname === "/api/demo/cut") return json(res, 200, await cut());
