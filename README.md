@@ -1,5 +1,7 @@
 # Leash
 
+**ETHGlobal Tokyo 2026 submission: [ethglobal.com/showcase/leash-ti1m5](https://ethglobal.com/showcase/leash-ti1m5)**
+
 **ENS-native permissions for autonomous traders. Name your agent, bound it, revoke it.**
 
 A Uniswap v4 hook that gates every swap on the trading agent's ENSv2 subname and on the risk policy stored in that agent's own Permissioned Resolver.
